@@ -145,7 +145,15 @@ Host 路由为 `/api/plugin-share`：
 
 ## 7. Web Client UI
 
-`src/client.js` 注册命名空间 `dshPluginShare`，提供中文和英文文本，并向 `settings.plugins.tab` 注入 `plugin-share` 标签页。UI 只使用 React、DSH Slots 和主题 token：
+`src/client.js` 注册命名空间 `dshPluginShare`，提供中文和英文文本，并向 `settings.plugins.tab` 注入 `plugin-share` 标签页。
+
+外观严格遵守 DSH 现有视觉语言，不自己造控件：
+
+- 控件一律使用官方 `@deepseek-ai/dsh-client-ui-primitives` 的 `Button`（`variant` = `primary` / `outline` / `ghost`，`size` = `md` / `sm`）和 `Tag`（`tone` = `outline` / `success` / `danger`），不手写按钮样式；
+- 布局样式放在本插件自己的 CSS 里，用 `--dsw-*` 主题 token（`--dsw-alias-bg-layer-1`、`--dsw-alias-border-l1/l2`、`--dsw-alias-label-*`、`--dsw-alias-state-*`），并以单个去重 `<style data-plugin="dsh-plugin-share" data-plugin-css="…">` 注入、随客户端运行卸载，与官方设置插件的做法一致；
+- 浏览器模块 id 与包名一致，`inject` 边声明其依赖的设置插件入口。
+
+标签页提供：
 
 - 导出当前 profile；
 - 粘贴并解析 D1；
@@ -161,9 +169,9 @@ Host 路由为 `/api/plugin-share`：
 按钮状态必须始终自解释，不能让用户面对一个没有理由的禁用按钮：
 
 - 预览列表属于「已被解析的那段码」。文本框内容一旦改动或重新导出，预览立即清空，安装按钮随之禁用并提示需要重新解析；
-- 按钮下方常驻一行状态说明，区分「先在下面粘贴组合码」「再点击解析组合码」「组合码已改动，请重新解析」「正在处理…」和「共 N · M 项将执行」；
-- 成功或失败信息紧贴按钮显示（`role="status"`），不依赖用户滚动到页面底部；
-- 每行动作以「将安装 / 将升级 / 将同步启用状态 / 已是当前版本」等文字呈现，并带来源标签（npm / github.com / builtin），便于防钓鱼核对。
+- 按钮下方常驻一行状态说明，区分「先在下面粘贴组合码」「再点击「解析组合码」」「组合码已改动，请重新解析」「正在处理…」和「共 N · M 项待处理」；
+- 成功或失败信息紧贴按钮显示，并带 `Tag`（`success` / `danger`），`role="status"` 播报，不依赖用户滚动到页面底部；
+- 每行显示插件名、来源 `Tag`、完整安装 spec 与动作文案（`安装` / `升级` / `启用` / `停用` / `已是当前版本`），便于防钓鱼核对。
 
 客户端请求必须带超时（`AbortController`），并且 `request()` 永远以结果对象 resolve 而不抛出，因此一次挂起的网络调用不会永久锁死标签页的所有按钮。
 

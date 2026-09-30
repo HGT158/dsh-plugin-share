@@ -2,9 +2,35 @@ window.__ModuleLoader__.load({
   id: 'dsh-plugin-share',
   factory(require) {
     const React = require('react')
+    const { Button, Tag } = require('@deepseek-ai/dsh-client-ui-primitives')
     const h = React.createElement
     const NS = 'dshPluginShare'
     const REQUEST_TIMEOUT_MS = 180000
+    const CSS_TAG_ID = 'dsh-plugin-share/PluginShareTab.module.css'
+
+    // Same shape the shipped settings plugins use: one deduped <style> tag that
+    // the client run removes again, styled only through --dsw-* tokens.
+    const CSS = `
+.dps-root{display:grid;gap:14px;width:100%;max-width:760px;color:var(--dsw-alias-label-primary)}
+.dps-intro{margin:0;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-tertiary)}
+.dps-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.dps-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
+.dps-status{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;line-height:20px}
+.dps-statusError{color:var(--dsw-alias-state-error-primary)}
+.dps-statusOk{color:var(--dsw-alias-label-secondary)}
+.dps-code{box-sizing:border-box;width:100%;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:1.6;resize:vertical}
+.dps-code:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:2px}
+.dps-heading{margin:0 0 8px;font-size:13px;font-weight:600;line-height:20px}
+.dps-cards{display:flex;flex-direction:column;gap:10px;margin:0;padding:0;list-style:none}
+.dps-card{display:grid;gap:6px;padding:12px;border:.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}
+.dps-cardHead{display:flex;align-items:center;gap:8px;min-width:0}
+.dps-name{min-width:0;font-size:13px;font-weight:600;line-height:20px;overflow-wrap:anywhere}
+.dps-rowAction{margin-left:auto;flex:none}
+.dps-spec{font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.dps-reason{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary)}
+.dps-notice{display:grid;gap:8px;padding:12px;border:.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 10%,transparent)}
+.dps-noticeText{margin:0;font-size:13px;line-height:20px}
+`
 
     const zh = {
       tab: '插件分享',
@@ -13,13 +39,14 @@ window.__ModuleLoader__.load({
       parse: '解析组合码',
       installAll: '全部安装',
       copy: '复制',
-      codePlaceholder: '在这里粘贴 D1 组合码…',
-      empty: '还没有解析结果。',
-      entries: '插件清单',
       cancel: '取消',
+      codePlaceholder: '在这里粘贴 D1 组合码…',
+      entries: '插件清单',
       refused: '被拒绝',
       build: '安装需要运行构建脚本：',
       approveAndRetry: '允许脚本并重试',
+      doneTag: '已完成',
+      failedTag: '失败',
       copied: '已复制',
       success: '导入完成',
       successSkipped: '没有需要变更的条目，所有插件都已是当前状态。',
@@ -31,10 +58,9 @@ window.__ModuleLoader__.load({
       rowEnable: '启用',
       rowDisable: '停用',
       rowCurrent: '已是当前版本',
-      working: '正在处理…',
       rowWorking: '处理中…',
       rowDone: '已完成',
-      rowFailed: '失败',
+      working: '正在处理…',
       hintSingle: '每个插件都可以单独处理，或点「全部安装」一次装完。',
       hostOld: '宿主半不支持单独安装，请重启 DSH 后再试（当前只能「全部安装」）。',
       needCode: '先在下面粘贴组合码',
@@ -50,13 +76,14 @@ window.__ModuleLoader__.load({
       parse: 'Parse code',
       installAll: 'Install all',
       copy: 'Copy',
-      codePlaceholder: 'Paste a D1 share code here…',
-      empty: 'Nothing parsed yet.',
-      entries: 'Plugin list',
       cancel: 'Cancel',
+      codePlaceholder: 'Paste a D1 share code here…',
+      entries: 'Plugin list',
       refused: 'Refused',
       build: 'Installation requests build scripts:',
       approveAndRetry: 'Allow scripts and retry',
+      doneTag: 'Done',
+      failedTag: 'Failed',
       copied: 'Copied',
       success: 'Import complete',
       successSkipped: 'Nothing to change; every plugin is already current.',
@@ -68,10 +95,9 @@ window.__ModuleLoader__.load({
       rowEnable: 'Enable',
       rowDisable: 'Disable',
       rowCurrent: 'Already current',
-      working: 'Working…',
       rowWorking: 'Working…',
-      rowDone: 'done',
-      rowFailed: 'failed',
+      rowDone: 'Done',
+      working: 'Working…',
       hintSingle: 'Apply any plugin on its own, or use Install all.',
       hostOld: 'This host half cannot apply single rows; restart DSH to retry. Only Install all is available.',
       needCode: 'Paste a share code below first',
@@ -82,14 +108,19 @@ window.__ModuleLoader__.load({
     }
 
     function publicLabel(entry) {
-      if (entry.kind === 'github') return entry.spec
-      return entry.name
+      if (!entry) return ''
+      if (entry.kind === 'github') return entry.spec ?? entry.value ?? ''
+      return entry.name ?? entry.value ?? ''
     }
 
     function sourceLabel(entry) {
-      if (entry.kind === 'github') return 'github.com'
-      if (entry.kind === 'builtin') return 'builtin'
+      if (entry?.kind === 'github') return 'github.com'
+      if (entry?.kind === 'builtin') return 'builtin'
       return 'npm'
+    }
+
+    function rowIndexOf(row, position) {
+      return Number.isInteger(row?.index) ? row.index : position
     }
 
     /** The per-row button label and whether that row is actionable. */
@@ -130,43 +161,27 @@ window.__ModuleLoader__.load({
     }
 
     function Preview({ rows, t, busy, busyRow, canSelect, onApply }) {
-      if (!Array.isArray(rows) || rows.length === 0) {
-        return h('p', { style: { margin: 0, color: 'var(--dsw-alias-label-tertiary)' } }, t('empty'))
-      }
-      return h('div', { style: { display: 'grid', gap: 8 } }, rows.map((row, position) => {
+      return h('ul', { className: 'dps-cards' }, rows.map((row, position) => {
         const entry = row.entry ?? {}
+        const index = rowIndexOf(row, position)
         const button = rowButton(row, t)
-        const working = busyRow !== null && (busyRow === (row.index ?? position))
-        return h('div', {
-          key: `${position}-${publicLabel(entry)}`,
-          style: {
-            border: '0.5px solid var(--dsw-alias-border-l3)',
-            borderRadius: 'var(--dsw-radius-md)',
-            padding: '9px 11px',
-            display: 'grid',
-            gap: 6,
-          },
-        },
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
-          h('span', {
-            style: {
-              fontSize: 11,
-              padding: '1px 6px',
-              borderRadius: 'var(--dsw-radius-sm)',
-              border: '0.5px solid var(--dsw-alias-border-l3)',
-              color: 'var(--dsw-alias-label-tertiary)',
-            },
-          }, sourceLabel(entry)),
-          h('strong', { style: { overflowWrap: 'anywhere' } }, publicLabel(entry)),
-          h('button', {
-            type: 'button',
-            disabled: busy || button.disabled || !canSelect,
-            title: button.refused ? (row.verdict?.reason ?? t('refused')) : (canSelect ? button.label : t('hostOld')),
-            onClick: () => onApply(row, position),
-            style: { marginLeft: 'auto' },
-          }, working ? t('rowWorking') : button.label)),
-        h('code', { style: { color: 'var(--dsw-alias-label-secondary)', overflowWrap: 'anywhere' } }, row.spec),
-        button.refused ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary)' } }, `${t('refused')}: ${row.verdict.reason}`) : null)
+        const working = busyRow !== null && busyRow === index
+        return h('li', { key: `${index}-${publicLabel(entry)}`, className: 'dps-card' },
+          h('div', { className: 'dps-cardHead' },
+            h('span', { className: 'dps-name' }, publicLabel(entry)),
+            h(Tag, { tone: 'outline' }, sourceLabel(entry)),
+            h(Button, {
+              className: 'dps-rowAction',
+              variant: 'outline',
+              size: 'sm',
+              disabled: busy || button.disabled || !canSelect,
+              title: button.refused ? (row.verdict?.reason ?? t('refused')) : (canSelect ? button.label : t('hostOld')),
+              onClick: () => onApply(row, position),
+            }, working ? t('rowWorking') : button.label)),
+          h('code', { className: 'dps-spec' }, row.spec),
+          button.refused
+            ? h('p', { className: 'dps-reason' }, `${t('refused')}: ${row.verdict.reason}`)
+            : null)
       }))
     }
 
@@ -210,6 +225,9 @@ window.__ModuleLoader__.load({
 
       /** Apply one preview row: `index === null` means the whole list. */
       const apply = async (index, approvedBuilds) => {
+        const target = index === null || !Array.isArray(preview)
+          ? null
+          : preview.find((row, position) => rowIndexOf(row, position) === index)
         setBusy(true)
         setBusyRow(index)
         setStatus(null)
@@ -230,7 +248,7 @@ window.__ModuleLoader__.load({
           if (result.ok) {
             setPending(null)
             const acted = (result.report ?? []).filter((row) => row.status !== 'skipped' && row.status !== 'refused')
-            const label = index === null ? t('success') : `${t('rowDone')} · ${publicLabel(preview?.[index]?.entry ?? {})}`
+            const label = index === null ? t('success') : `${t('rowDone')} · ${target?.spec ?? ''}`
             setStatus({ kind: 'ok', text: acted.length === 0 ? t('successSkipped') : label })
             await refresh()
             return
@@ -287,6 +305,8 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const cancel = () => request('cancel', { requestId })
+
       const copy = async () => {
         try {
           await navigator.clipboard.writeText(code)
@@ -309,78 +329,59 @@ window.__ModuleLoader__.load({
                 ? t('hostOld')
                 : `${t('total')} ${preview.length} · ${pendingRows} ${t('willRun')} · ${t('hintSingle')}`
 
-      return h('section', {
-        style: {
-          width: '100%',
-          maxWidth: 760,
-          color: 'var(--dsw-alias-label-primary)',
-          display: 'grid',
-          gap: 14,
-        },
-      },
-      h('p', { style: { margin: 0, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.5 } }, t('intro')),
-      h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' } },
-        h('button', { type: 'button', disabled: busy, onClick: exportCurrent }, t('export')),
-        h('button', { type: 'button', disabled: busy || !trimmed, onClick: parse }, t('parse')),
-        h('button', { type: 'button', disabled: busy || !trimmed, onClick: copy }, t('copy')),
-        h('button', {
-          type: 'button',
-          disabled: busy || !parsed || pendingRows === 0,
-          onClick: () => apply(null),
-        }, t('installAll')),
-        busy ? h('button', { type: 'button', onClick: () => request('cancel', { requestId }), disabled: !requestId }, t('cancel')) : null),
-      h('p', { style: { margin: 0, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' } }, hint),
-      status ? h('p', {
-        role: 'status',
-        'aria-live': 'polite',
-        style: {
-          margin: 0,
-          color: status.kind === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-state-success-primary, var(--dsw-alias-label-primary))',
-        },
-      }, status.text) : null,
-      h('textarea', {
-        value: code,
-        onChange: (event) => {
-          const next = event.target.value
-          setCode(next)
-          if (next.trim() !== parsedCode) clear()
-        },
-        placeholder: t('codePlaceholder'),
-        spellCheck: false,
-        rows: 6,
-        style: {
-          width: '100%',
-          boxSizing: 'border-box',
-          resize: 'vertical',
-          border: '0.5px solid var(--dsw-alias-border-l3)',
-          borderRadius: 'var(--dsw-radius-md)',
-          background: 'var(--dsw-alias-bg-layer-1)',
-          color: 'var(--dsw-alias-label-primary)',
-          padding: 10,
-          fontFamily: 'var(--ds-font-family-code)',
-        },
-      }),
-      preview ? h('div', null, h('h3', { style: { margin: '0 0 8px' } }, t('entries')),
-        h(Preview, {
-          rows: preview,
-          t,
-          busy,
-          busyRow,
-          canSelect: selection,
-          onApply: (row, position) => apply(Number.isInteger(row.index) ? row.index : position),
-        })) : null,
-      pending ? h('div', {
-        style: {
-          borderRadius: 'var(--dsw-radius-md)',
-          background: 'color-mix(in srgb, var(--dsw-alias-state-warning-primary) 10%, transparent)',
-          padding: 10,
-          display: 'grid',
-          gap: 8,
-        },
-      },
-      h('strong', null, t('build')),
-      h('code', null, pending.builds.join(', ')),
-      h('button', { type: 'button', disabled: busy, onClick: () => apply(pending.index, pending.builds) }, t('approveAndRetry'))) : null)
+      return h('section', { className: 'dps-root' },
+        h('p', { className: 'dps-intro' }, t('intro')),
+        h('div', { className: 'dps-toolbar' },
+          h(Button, { variant: 'outline', size: 'md', disabled: busy, onClick: exportCurrent }, t('export')),
+          h(Button, {
+            variant: parsed && pendingRows > 0 ? 'outline' : 'primary',
+            size: 'md',
+            disabled: busy || !trimmed,
+            onClick: parse,
+          }, t('parse')),
+          h(Button, { variant: 'ghost', size: 'md', disabled: busy || !trimmed, onClick: copy }, t('copy')),
+          h(Button, {
+            variant: parsed && pendingRows > 0 ? 'primary' : 'outline',
+            size: 'md',
+            disabled: busy || !parsed || pendingRows === 0,
+            onClick: () => apply(null),
+          }, t('installAll')),
+          busy ? h(Button, { variant: 'ghost', size: 'md', disabled: !requestId, onClick: cancel }, t('cancel')) : null),
+        h('p', { className: 'dps-hint' }, hint),
+        status ? h('p', { className: 'dps-status', role: 'status', 'aria-live': 'polite' },
+          h(Tag, { tone: status.kind === 'error' ? 'danger' : 'success' }, status.kind === 'error' ? t('failedTag') : t('doneTag')),
+          h('span', { className: status.kind === 'error' ? 'dps-statusError' : 'dps-statusOk' }, status.text)) : null,
+        h('textarea', {
+          className: 'dps-code',
+          value: code,
+          onChange: (event) => {
+            const next = event.target.value
+            setCode(next)
+            if (next.trim() !== parsedCode) clear()
+          },
+          placeholder: t('codePlaceholder'),
+          spellCheck: false,
+          rows: 5,
+        }),
+        preview ? h('div', null,
+          h('h3', { className: 'dps-heading' }, t('entries')),
+          h(Preview, {
+            rows: preview,
+            t,
+            busy,
+            busyRow,
+            canSelect: selection,
+            onApply: (row, position) => apply(rowIndexOf(row, position), undefined),
+          })) : null,
+        pending ? h('div', { className: 'dps-notice' },
+          h('p', { className: 'dps-noticeText' }, t('build')),
+          h('code', { className: 'dps-spec' }, pending.builds.join(', ')),
+          h('div', null, h(Button, {
+            variant: 'outline',
+            size: 'sm',
+            disabled: busy,
+            onClick: () => apply(pending.index, pending.builds),
+          }, t('approveAndRetry')))) : null)
     }
 
     return {
@@ -388,6 +389,17 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         const t = ctx.locale.bind(NS)
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-plugin-share: dictionaries')
+        ctx.effect(() => {
+          if (typeof document === 'undefined') return () => {}
+          const selector = `style[data-plugin-css="${CSS_TAG_ID}"]`
+          if (document.querySelector(selector)) return () => {}
+          const tag = document.createElement('style')
+          tag.dataset.plugin = 'dsh-plugin-share'
+          tag.dataset.pluginCss = CSS_TAG_ID
+          tag.textContent = CSS
+          document.head.appendChild(tag)
+          return () => tag.remove()
+        }, 'dsh-plugin-share: styles')
         ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
           name: 'settings.plugins.tab',
           id: 'plugin-share',

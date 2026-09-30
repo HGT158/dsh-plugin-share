@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { collectEntries } from '../src/host/collect.mjs'
-import { applyPreview, previewEntries } from '../src/host/import.mjs'
+import { applyPreview, previewEntries, selectPreview } from '../src/host/import.mjs'
 
 test('collector exports portable removable bundles and optional builtins', () => {
   const result = collectEntries({
@@ -71,6 +71,36 @@ test('preview applies an enabled-state change without reinstalling', () => {
     { name: 'same', version: '1.0.0', enabled: true },
   ] })
   assert.equal(preview[0].action, 'set-enabled')
+})
+
+test('preview keeps a stable index so one row can be applied alone', () => {
+  const preview = previewEntries([
+    { name: 'first', version: '1.0.0' },
+    { name: 'second', version: '1.0.0' },
+    { name: 'third', version: '1.0.0' },
+  ])
+  assert.deepEqual(preview.map((row) => row.index), [0, 1, 2])
+  assert.deepEqual(selectPreview(preview, [1]).map((row) => row.entry.value), ['second'])
+  assert.deepEqual(selectPreview(preview, undefined).map((row) => row.index), [0, 1, 2])
+  assert.deepEqual(selectPreview(preview, []).length, 0)
+  assert.deepEqual(selectPreview(preview, [1, 1, 99, -1]).map((row) => row.index), [1])
+})
+
+test('applying a selected preview touches only that row', async () => {
+  const calls = []
+  const manager = {
+    async installBundle(spec) { calls.push(spec); return { installed: true } },
+    async removeBundle(spec) { calls.push(`remove:${spec}`) },
+  }
+  const preview = previewEntries([
+    { name: 'keep', version: '1.0.0' },
+    { name: 'chosen', version: '2.0.0' },
+    { name: 'later', version: '3.0.0' },
+  ])
+  const result = await applyPreview(selectPreview(preview, [1]), manager)
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls, ['chosen@2.0.0'])
+  assert.deepEqual(result.report.map((row) => row.status), ['installed'])
 })
 
 test('applyPreview stops on build approval and rolls back new installs', async () => {

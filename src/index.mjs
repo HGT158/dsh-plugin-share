@@ -20,5 +20,5 @@ export {
 } from './shared/entries.mjs'
 
 export { collectEntries } from './host/collect.mjs'
-export { previewEntries, applyPreview } from './host/import.mjs'
+export { previewEntries, applyPreview, selectPreview } from './host/import.mjs'
 export { apply, inject } from './host/dsh.mjs'

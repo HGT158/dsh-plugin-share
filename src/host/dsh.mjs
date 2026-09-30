@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { collectEntries } from './collect.mjs'
-import { applyPreview, previewEntries } from './import.mjs'
+import { applyPreview, previewEntries, selectPreview } from './import.mjs'
 import { decodeCode, encodeCode } from './codec.mjs'
 
 const ROUTE = '/api/plugin-share'
@@ -75,7 +75,9 @@ async function previewCode(code, pluginManager) {
   if (!decoded.ok) return { ok: false, error: decoded.reason }
   const bundles = await listBundles(pluginManager)
   const preview = previewEntries(decoded.entries.map(publicEntry), { installed: bundles })
-  return { ok: true, decoded, bundles, preview }
+  // `selection` tells the client this host half understands `only`, so a
+  // per-row button can never be answered by an older host as "apply all".
+  return { ok: true, selection: true, decoded, bundles, preview }
 }
 
 async function handle(req, res, pluginManager) {
@@ -119,12 +121,22 @@ async function handle(req, res, pluginManager) {
       sendJson(res, 400, result)
       return
     }
+    if (body.only !== undefined && (!Array.isArray(body.only) || body.only.some((value) => !Number.isInteger(value)))) {
+      sendJson(res, 400, { ok: false, error: 'only-invalid' })
+      return
+    }
     if (body.confirm !== true) {
       sendJson(res, 200, { ...result, error: 'confirmation-required' })
       return
     }
+    // `only` carries preview indices so the UI can apply a single row.
+    const selected = selectPreview(result.preview, body.only)
+    if (selected.length === 0) {
+      sendJson(res, 400, { ok: false, error: 'selection-empty', preview: result.preview })
+      return
+    }
     const requestId = typeof body.requestId === 'string' && body.requestId ? body.requestId : randomUUID()
-    const applied = await applyPreview(result.preview, pluginManager, {
+    const applied = await applyPreview(selected, pluginManager, {
       requestId,
       ...(Array.isArray(body.approvedBuilds) ? { approvedBuilds: body.approvedBuilds } : {}),
     })

@@ -20,7 +20,7 @@ function installedEnabled(bundle) {
 export function previewEntries(entries, { installed = [] } = {}) {
   if (!Array.isArray(installed)) throw new TypeError('installed must be an array')
   const normalized = normalizeEntries(entries)
-  return normalized.map((entry) => {
+  return normalized.map((entry, index) => {
     const spec = installSpec(entry)
     const verdict = entry.kind === 'github' ? classifySpec(entry.value) : { ok: true, kind: entry.kind === 'builtin' ? 'builtin' : 'npm' }
     const current = installed.find((bundle) => installedName(bundle) === nameOf(entry) || bundle?.spec === spec)
@@ -34,8 +34,20 @@ export function previewEntries(entries, { installed = [] } = {}) {
         action = 'upgrade'
       }
     }
-    return { entry, spec, verdict, current, action }
+    return { index, entry, spec, verdict, current, action }
   })
+}
+
+/**
+ * Keep the preview rows a caller selected by their stable preview index.
+ * Omitting `only` selects every row, so a whole-code import stays the default.
+ */
+export function selectPreview(preview, only) {
+  if (!Array.isArray(preview)) throw new TypeError('preview must be an array')
+  if (only === undefined || only === null) return preview.slice()
+  if (!Array.isArray(only)) throw new TypeError('only must be an array')
+  const wanted = new Set(only.filter((value) => Number.isInteger(value) && value >= 0 && value < preview.length))
+  return preview.filter((row, index) => wanted.has(Number.isInteger(row?.index) ? row.index : index))
 }
 
 /**

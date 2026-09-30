@@ -1,43 +1,113 @@
 # DSH Plugin Share
 
-一个按 DSH **bundle** 格式打包的 Web 插件，用离线分享码导出和导入可移植的插件清单。分享码只包含插件来源、版本和启用状态，不包含插件配置、凭据或本机路径。
+把「我这套装了哪些插件」变成一段可粘贴的**离线分享码**，别人贴进去就能**逐个安装**。
 
-当前版本通过 `dsh.client` 接入 DSH Web，在“设置 → 插件”中提供导出、粘贴解析、预览、**逐行单独安装**（每行一个按钮，另有「全部安装」）、构建脚本确认、取消和复制。组合码以 `D1` 开头，内部使用 NP1 风格的二进制记录：短清单直接使用原始二进制；长清单仅在 `deflate-raw` 结果更短时使用压缩，否则仍使用原始记录。
+> Offline, pasteable DSH plugin-set share codes: export your plugin list, import someone else's one plugin at a time.
 
-## DSH 插件格式
+![插件分享标签页](docs/plugin-share-tab.png)
 
-根目录是一个可公开安装的 DSH bundle：
+---
 
-- `package.json` 的 `dsh.bundle.patch` 指向 [`cordis.patch.yml`](cordis.patch.yml)；
-- `dsh.client` 声明 Web 客户端入口，`exports["./client"]` 指向 [`src/client.js`](src/client.js)；
-- patch 行的 `name` 与 package name 都是 `dsh-plugin-share`；
-- [`src/index.mjs`](src/index.mjs) 是 Host 半入口，提供编码器、采集器、预览和导入适配器。
+## 快速开始
 
-这遵循 DSH 官方的组合包模型：bundle 提供一个 patch 层，profile 负责安装和排列 bundle。客户端代码不会读取或上传 profile 配置文件。
+### 1. 安装插件
 
-## 安装
-
-在 Harness Web profile 中从公开 GitHub 仓库安装：
+分享方和接收方**都需要装这个插件**——它提供的正是「导出/粘贴导入」这个界面。码本身只是文本。
 
 ```powershell
 dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#main'
 dsh --profile web
 ```
 
-打开 Harness Web 的“设置 → 插件”，找到“插件分享”。从 GitHub 源安装时，DSH/pnpm 可能报告依赖包的构建脚本；只在信任源代码并理解其用途时批准。
+然后打开 Harness Web → **设置 → 内置插件 → 插件分享**。
 
-## 本地开发和测试
+> 这个包是纯 JS、零依赖、没有构建脚本，所以安装时**不会要求你批准任何 build script**，装完即用。
 
-从仓库根目录运行：
+### 2. 导出：把你这套插件变成码
+
+1. 点 **「从当前 profile 导出」**
+2. 文本框出现 `D1...` 开头的码
+3. 点 **「复制」**，发给对方（微信 / Slack / 任何能发文本的地方）
+
+### 3. 导入：把别人的码装到本机
+
+1. 把码粘进文本框，点 **「解析组合码」**
+2. 下面逐行列出：插件名、来源（`npm` / `github.com` / `builtin`）、完整安装规格、将要执行的动作
+3. 每个插件右侧都有**自己的按钮**：
+
+   | 按钮 | 含义 |
+   |---|---|
+   | `安装` | 本机没有 → 安装 |
+   | `升级` | 已装旧版本 → 升级到码里的版本 |
+   | `启用` / `停用` | 已装但启用状态不一致 → 只改状态，不重装 |
+   | `已是当前版本` | 无需操作（灰色不可点） |
+
+   也可以点顶部 **「全部安装」** 一次装完。
+4. 某个包需要跑安装脚本时，会单独提示并等你勾选批准——**默认拒绝执行脚本**
+5. 装完**重启 dsh** 生效
+
+---
+
+## 更新到最新版
+
+锁文件会把 `#main` 钉在某个具体提交上，所以升级要显式执行：
 
 ```powershell
-npm test
-pnpm pack --dry-run
-npm run encode:example
-node src/cli.mjs decode D1...
+dsh plugin --profile web update dsh-plugin-share
+dsh --profile web
 ```
 
-用一个新的临时 Web profile 测试本地工作树（profile 名称必须尚未使用）：
+想固定版本（可复现），改用 tag：
+
+```powershell
+dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#v0.1.0'
+```
+
+---
+
+## 码里有什么
+
+只有三样东西：
+
+| 字段 | 说明 |
+|---|---|
+| 来源 | npm 包名 / `github:owner/repo[#ref]` / DSH 官方可选 builtin |
+| 版本 | 版本或版本范围；留空表示跟随最新 |
+| 启用状态 | 启用 / 停用 |
+
+**不含**插件配置、`settings`、`patch`、密钥、token、认证信息或本机路径。格式细节见 [PLAN.md](PLAN.md)。
+
+### 支持的来源
+
+- npm 包：包名 + 版本或版本范围
+- GitHub：`github:owner/repo`，可选 `#ref`
+- DSH 官方可选 builtin bundle：包名 + 启用状态
+
+### 一律拒绝
+
+本地路径、`file:`、`link:`、`portal:`、`workspace:`、任意 HTTP(S) tarball、Git remote（`git+…` / `git@` / `ssh://`）、配置字段与未知字段。
+
+---
+
+## 安全边界
+
+- 导入**一定先展示逐条预览**，不会静默安装任何东西
+- 安装脚本**默认拒绝**，必须你显式批准；批准只对本次生效，不会随码传播
+- 失败即停，并撤销本次新装的包（已存在的升级不会被破坏性回滚）
+- **CRC32 只用来发现复制错误，不是签名**，也不能防篡改。请核对预览里的来源再安装
+
+---
+
+## 开发
+
+```powershell
+npm test                 # 编解码 + 采集 + 导入事务，共 20 项
+pnpm pack --dry-run      # 检查发布内容
+npm run encode:example   # 用 examples/plugins.json 生成一个码
+node src/cli.mjs decode D1...   # 命令行解码
+```
+
+把本地工作树装进一个临时 profile：
 
 ```powershell
 $profile = 'plugin-share-test'
@@ -46,27 +116,15 @@ dsh plugin --profile $profile add (Get-Location).Path
 dsh --profile $profile
 ```
 
-测试后移除临时 profile 中的 bundle：
+### 项目结构
 
-```powershell
-dsh plugin --profile plugin-share-test remove dsh-plugin-share
-```
+| 文件 | 作用 |
+|---|---|
+| `package.json` | DSH bundle 清单：`dsh.bundle.patch` + `dsh.client` |
+| `cordis.patch.yml` | 插入本插件的那一行 patch |
+| `src/index.mjs` | Host 半入口（编解码、采集、预览、导入） |
+| `src/client.js` | Web Client 半（设置页里的标签页） |
+| `src/shared/` | D1/NP1 编解码与条目校验 |
+| `src/host/` | 采集、预览、事务导入、HTTP 路由 |
 
-## 支持的来源与安全边界
-
-- npm 包：包名和版本或版本范围；未指定版本时跟随最新版本；
-- GitHub 来源：`github:owner/repo`，可选 `#ref`；
-- DSH 官方可选 builtin bundle：包名和启用状态。
-
-本地路径、`file:`、`link:`、`portal:`、`workspace:`、任意 HTTP(S) URL、Git remote、配置字段和未知字段都会拒绝。导入会先展示预览；构建脚本必须由用户明确批准。CRC32 只用于发现复制错误，不是签名或防篡改证明，因此请核对导入预览并只安装可信来源。
-
-完整的字段模型、D1/NP1 帧结构、采集规则、事务回滚和已知限制见 [`PLAN.md`](PLAN.md)。
-
-## 项目检查
-
-GitHub Actions 在 push 和 Pull Request 时运行 `npm test` 与 `pnpm pack --dry-run`。发布前还应确认：
-
-- `package.json` 不含私有包标记、个人邮箱、认证信息或本机路径；
-- `cordis.patch.yml` 的 bundle 名称与 package name 一致；
-- 短清单保持 raw，长清单只有在压缩更短时才使用 `deflate-raw`；
-- 公共文件没有凭据值或不可移植的绝对路径。
+CI 在每次 push / PR 时运行 `npm test` 与 `pnpm pack --dry-run`。

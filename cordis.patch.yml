@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-plugin-share
+      name: 'dsh-plugin-share'
+      config: {}

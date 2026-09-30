@@ -1,0 +1,10 @@
+node_modules/
+.pnpm-store/
+.npm/
+*.tgz
+coverage/
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db

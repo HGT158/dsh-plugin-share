@@ -1,0 +1,8 @@
+[
+  { "name": "dsh-pocket", "version": "2.10.6", "enabled": true },
+  { "name": "@liustack/modlens", "version": "0.3.1", "enabled": true },
+  { "spec": "github:uluckystar/dsh-plugin-market#v1.2.3", "enabled": true },
+  { "name": "@modelcontextprotocol/server-filesystem", "version": "^0.6.2", "enabled": false },
+  { "name": "@deepseek-ai/dsh-experimental-schedule-bundle", "kind": "builtin", "enabled": true }
+]
+

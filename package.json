@@ -1,0 +1,39 @@
+{
+  "name": "dsh-plugin-share",
+  "version": "0.1.0",
+  "description": "Offline DSH plugin set sharing with a compact D1/NP1 code",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "src",
+    "icon.svg",
+    "locale",
+    "cordis.patch.yml",
+    "README.md",
+    "PLAN.md"
+  ],
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "encode:example": "node src/cli.mjs encode examples/plugins.json"
+  }
+}

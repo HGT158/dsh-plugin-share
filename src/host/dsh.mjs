@@ -2,9 +2,32 @@ import { randomUUID } from 'node:crypto'
 import { collectEntries } from './collect.mjs'
 import { applyPreview, previewEntries, selectPreview } from './import.mjs'
 import { decodeCode, encodeCode } from './codec.mjs'
+import { encodeQr } from '../shared/qr.mjs'
+import { scanQrImage } from '../shared/qr-scan.mjs'
 
 const ROUTE = '/api/plugin-share'
-const MAX_BODY_BYTES = 2 * 1024 * 1024
+// A 1400x1400 grayscale scan payload is about 1.9 MB before base64, so the
+// ceiling covers one screenshot with room to spare. Local endpoint only.
+const MAX_BODY_BYTES = 8 * 1024 * 1024
+// M fits a typical share code and is the friendlier level for a phone camera;
+// L is the fallback that still holds the longest code we can turn into a symbol.
+const QR_LEVELS = ['M', 'L']
+const MAX_SCAN_PIXELS = 4 * 1024 * 1024
+
+function buildQr(code) {
+  for (const level of QR_LEVELS) {
+    try {
+      return encodeQr(code, { level })
+    } catch (error) {
+      if (error?.message !== 'qr-too-long') throw error
+    }
+  }
+  return null
+}
+
+function compactCode(value) {
+  return value.replace(/\s+/gu, '')
+}
 
 function sendJson(res, status, value) {
   const body = JSON.stringify(value)
@@ -113,6 +136,68 @@ async function handle(req, res, pluginManager) {
   if (action === 'parse') {
     const result = await previewCode(body.code, pluginManager)
     sendJson(res, result.ok ? 200 : 400, result)
+    return
+  }
+  if (action === 'scan') {
+    const { width, height } = body
+    if (!Number.isInteger(width) || !Number.isInteger(height)
+      || width < 21 || height < 21 || width * height > MAX_SCAN_PIXELS
+      || typeof body.gray !== 'string' || body.gray === '') {
+      sendJson(res, 400, { ok: false, error: 'qr-image-invalid' })
+      return
+    }
+    const gray = new Uint8Array(Buffer.from(body.gray, 'base64'))
+    if (gray.length !== width * height) {
+      sendJson(res, 400, { ok: false, error: 'qr-image-invalid' })
+      return
+    }
+    const scanned = scanQrImage(gray, width, height)
+    if (!scanned.ok) {
+      sendJson(res, 422, { ok: false, error: scanned.reason, ...(scanned.text ? { text: scanned.text } : {}) })
+      return
+    }
+    // The D1 checksum is the acceptance test: a garbled read can never come
+    // back as a usable code.
+    const decoded = decodeCode(scanned.text)
+    if (!decoded.ok) {
+      sendJson(res, 422, { ok: false, error: 'qr-not-a-share-code', text: scanned.text, reason: decoded.reason })
+      return
+    }
+    sendJson(res, 200, {
+      ok: true,
+      code: scanned.text,
+      version: scanned.version,
+      level: scanned.level,
+      mask: scanned.mask,
+      entries: decoded.entries.length,
+    })
+    return
+  }
+  if (action === 'qr') {
+    if (typeof body.code !== 'string' || body.code.trim() === '') {
+      sendJson(res, 400, { ok: false, error: 'code-required' })
+      return
+    }
+    // Encode the canonical, whitespace-free code so a scan pastes cleanly.
+    const code = compactCode(body.code)
+    const decoded = decodeCode(code)
+    if (!decoded.ok) {
+      sendJson(res, 400, { ok: false, error: decoded.reason })
+      return
+    }
+    const qr = buildQr(code)
+    if (!qr) {
+      sendJson(res, 413, { ok: false, error: 'code-too-long-for-qr' })
+      return
+    }
+    sendJson(res, 200, {
+      ok: true,
+      version: qr.version,
+      size: qr.size,
+      level: qr.level,
+      mask: qr.mask,
+      modules: qr.modules,
+    })
     return
   }
   if (action === 'import') {

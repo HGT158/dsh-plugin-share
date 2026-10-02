@@ -33,6 +33,10 @@ Verified on `dsh 0.2.0-rc.2` with the Web profile (`@deepseek-ai/dsh-base` / `@d
 
 Click **Export current profile** → the box fills with a code starting with `D1` → click **Copy** and send it.
 
+You can also click **Show QR code** to draw that code as a scannable symbol (click **Hide QR code** to put it away); the panel shows its version and size, and **Save SVG** (vector, sharp at any scale) or **Save PNG** (bitmap, previews everywhere) keeps a copy.
+
+![QR code panel](docs/plugin-share-qr.png)
+
 **② Import — install someone else's code on this machine**
 
 Paste the code and click **Parse code**. Every plugin is listed with its name, source, full install spec, and the action it would take. Each row has its own button:
@@ -43,6 +47,8 @@ Paste the code and click **Parse code**. Every plugin is listed with its name, s
 | `Upgrade` | Older version installed → move to the version in the code |
 | `Enable` / `Disable` | Installed but the enablement differs → change state only, no reinstall |
 | `Already current` | Nothing to do (greyed out) |
+
+**Typing is optional**: click **Scan a code** to pick a QR image, or **drop the image straight onto the panel** — the code it reads lands in the box and parses immediately. Handy when someone sends you a screenshot instead of text.
 
 **Install all** at the top applies every pending row at once. Restart dsh afterwards, and press Ctrl+F5 in the browser.
 
@@ -56,8 +62,10 @@ Paste the code and click **Parse code**. Every plugin is listed with its name, s
 - **Stop on failure, roll back** — a failure stops the run instead of continuing; bundles installed by that run are removed and builtin enablement changed by it is restored. Existing upgrades are not destructively rolled back.
 - **Every disabled button explains itself** — a line under the toolbar says what is missing (no code pasted, not parsed yet, code changed, working) and how many rows are pending.
 - **Short codes first** — short lists stay raw binary; eight or more entries try `deflate-raw`, and only when it actually comes out shorter. A mixed 5-plugin sample is 218 characters, an npm/builtin-only list of 5 is 149 — both fit in WeChat, Slack, or X.
+- **QR code export** — click **Show QR code** to draw the current code as a black-and-white symbol your phone camera can pick up. It picks the smallest version at level M, falls back to L, and says so plainly when the code is simply too long for a symbol. **Save SVG** keeps vector, **Save PNG** keeps a bitmap for chat apps.
+- **Scan a code back in** — pick an image or drop one on the panel and the code it contains is filled in and parsed for you. Reading happens entirely on your machine; nothing is uploaded, and the result still has to pass the share code's CRC32, so a single misread byte is reported as a failure instead of being pasted as a broken code.
 - **Native DSH look** — controls come from the official `@deepseek-ai/dsh-client-ui-primitives` (`Button`, `Tag`) and colors from `--dsw-*` theme tokens, matching the rest of the settings surface.
-- **Fully local** — encoding, decoding, and validation all happen on your machine with no third-party service involved. The network is touched only when you click install, and only to reach npm or GitHub.
+- **Fully local** — encoding, decoding, validation and even QR generation all happen on your machine with no third-party service involved. The network is touched only when you click install, and only to reach npm or GitHub.
 
 ## Updating
 
@@ -102,10 +110,16 @@ No, and that is deliberate in v1: it carries *which plugins*, not *how they are 
 **How long is a code?**
 A mixed 5-plugin sample measured 218 characters; five npm/builtin-only entries measured 149. Compression is considered from eight entries up. Very long package names or very many entries can still exceed some channel limits.
 
+**The QR code will not scan.**
+Point the camera or scanner app straight at the screen instead of photographing it first. The panel prints the version: 57×57 (version 10, roughly 180 characters) is comfortable on a phone screen, while version 20 and above gets dense enough that sending the text is the better move.
+
+**Scan a code cannot read my image.**
+It targets **upright, clean QR images**: files this plugin saved, a screenshot someone sent you, a screen capture. Those are read reliably — even when the symbol is a small part of a full-screen screenshot. Angled photos, blur and damage are out of scope, and it says "no QR code found" or "could not read" rather than guessing.
+
 ## Development
 
 ```powershell
-npm test                        # codec + collector + import transaction, 20 tests
+npm test                        # codec + collector + import transaction + QR + scanner, 32 tests
 pnpm pack --dry-run             # inspect what would be published
 npm run encode:example          # build a code from examples/plugins.json
 node src/cli.mjs decode D1...   # decode from the command line

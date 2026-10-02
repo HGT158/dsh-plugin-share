@@ -21,4 +21,6 @@ export {
 
 export { collectEntries } from './host/collect.mjs'
 export { previewEntries, applyPreview, selectPreview } from './host/import.mjs'
+export { encodeQr, chooseVersion, qrToSvg, dataModules, rsBlocks, maskApplies, EC_LEVELS, MAX_VERSION } from './shared/qr.mjs'
+export { scanQrImage } from './shared/qr-scan.mjs'
 export { apply, inject } from './host/dsh.mjs'

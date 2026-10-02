@@ -8,3 +8,6 @@ coverage/
 !.env.example
 .DS_Store
 Thumbs.db
+
+# 本地 agent 协作约定，不随仓库发布
+AGENTS.md

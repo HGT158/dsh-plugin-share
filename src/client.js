@@ -2,7 +2,7 @@ window.__ModuleLoader__.load({
   id: 'dsh-plugin-share',
   factory(require) {
     const React = require('react')
-    const { Button, Tag } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { Button, Tag, Menu } = require('@deepseek-ai/dsh-client-ui-primitives')
     const h = React.createElement
     const NS = 'dshPluginShare'
     const REQUEST_TIMEOUT_MS = 180000
@@ -30,6 +30,12 @@ window.__ModuleLoader__.load({
 .dps-reason{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary)}
 .dps-notice{display:grid;gap:8px;padding:12px;border:.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 10%,transparent)}
 .dps-noticeText{margin:0;font-size:13px;line-height:20px}
+.dps-qr{display:flex;gap:16px;align-items:flex-start;padding:12px;border:.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}
+.dps-qrCanvas{flex:none;line-height:0;border-radius:8px;overflow:hidden;background:#ffffff}
+.dps-qrSide{display:grid;gap:8px;min-width:0}
+.dps-qrMeta{margin:0;font-size:13px;font-weight:600;line-height:20px}
+.dps-qrActions{display:flex;flex-wrap:wrap;gap:8px}
+.dps-dropping{outline:2px dashed var(--dsw-alias-brand-primary);outline-offset:6px;border-radius:12px}
 `
 
     const zh = {
@@ -68,6 +74,25 @@ window.__ModuleLoader__.load({
       stale: '组合码已改动，请重新解析',
       total: '共',
       willRun: '项待处理',
+      qr: '展示二维码',
+      qrHide: '收起二维码',
+      qrSave: '保存 SVG',
+      qrSavePng: '保存 PNG',
+      qrAlt: '组合码二维码',
+      qrVersion: '版本',
+      qrNote: '用手机相机扫码即可把组合码带走，扫出来就是文本框里这段码。',
+      qrTooLong: '组合码太长，做不成二维码；可先精简插件清单，或直接用文本分享。',
+      scan: '扫码导入',
+      scanFromFile: '选择图片…',
+      scanDropHint: '也可以把图片直接拖进这个面板',
+      scanBusy: '识别中…',
+      scanDone: '已识别组合码并解析',
+      scanDrop: '松手即识别',
+      scanTooSmall: '图片太小，识别不了',
+      scanUnreadable: '二维码不完整或太模糊，识别失败',
+      scanNotFound: '图片里没找到二维码',
+      scanNotCode: '认出二维码了，但内容不是插件分享码',
+      scanBadImage: '图片数据无效',
     }
     const en = {
       tab: 'Plugin share',
@@ -105,6 +130,25 @@ window.__ModuleLoader__.load({
       stale: 'The code changed; parse it again',
       total: 'Total',
       willRun: 'to apply',
+      qr: 'Show QR code',
+      qrHide: 'Hide QR code',
+      qrSave: 'Save SVG',
+      qrSavePng: 'Save PNG',
+      qrAlt: 'Share code QR',
+      qrVersion: 'Version',
+      qrNote: 'Point a phone camera at it to carry the code away; it decodes to exactly the text in the box.',
+      qrTooLong: 'This code is too long for a QR code. Trim the plugin list or share it as text.',
+      scan: 'Scan a code',
+      scanFromFile: 'Choose an image…',
+      scanDropHint: 'or drop an image straight onto this panel',
+      scanBusy: 'Reading…',
+      scanDone: 'Scanned the code and parsed it',
+      scanDrop: 'Drop to read it',
+      scanTooSmall: 'That image is too small to read',
+      scanUnreadable: 'The QR code is incomplete or too blurry to read',
+      scanNotFound: 'No QR code found in that image',
+      scanNotCode: 'Found a QR code, but it is not a plugin share code',
+      scanBadImage: 'That image data is not usable',
     }
 
     function publicLabel(entry) {
@@ -130,6 +174,89 @@ window.__ModuleLoader__.load({
       if (row.action === 'upgrade') return { label: t('rowUpgrade'), disabled: false }
       if (row.action === 'set-enabled') return { label: row.entry.enabled ? t('rowEnable') : t('rowDisable'), disabled: false }
       return { label: t('rowInstall'), disabled: false }
+    }
+
+    const QR_QUIET_ZONE = 4
+    const QR_MODULE_SIZE = 4
+
+    /** One path command per dark module, in a 4-module quiet zone. */
+    function qrPath(modules) {
+      const parts = []
+      for (let row = 0; row < modules.length; row += 1) {
+        const line = modules[row]
+        for (let col = 0; col < line.length; col += 1) {
+          if (line[col] !== '1') continue
+          const x = (col + QR_QUIET_ZONE) * QR_MODULE_SIZE
+          const y = (row + QR_QUIET_ZONE) * QR_MODULE_SIZE
+          parts.push(`M${x} ${y}h${QR_MODULE_SIZE}v${QR_MODULE_SIZE}h-${QR_MODULE_SIZE}z`)
+        }
+      }
+      return parts.join('')
+    }
+
+    function qrExtent(size) {
+      return (size + QR_QUIET_ZONE * 2) * QR_MODULE_SIZE
+    }
+
+    /** The same symbol as the on-screen one, as a file the user can keep. */
+    function qrSvgSource(qr) {
+      const extent = qrExtent(qr.size)
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${extent} ${extent}" width="${extent}" height="${extent}" shape-rendering="crispEdges">`
+        + `<rect width="${extent}" height="${extent}" fill="#ffffff"/>`
+        + `<path d="${qrPath(qr.modules)}" fill="#000000"/></svg>`
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+
+    function toBase64(bytes) {
+      let binary = ''
+      const chunk = 0x8000
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+      }
+      return btoa(binary)
+    }
+
+    /**
+     * Read an image file into the grayscale buffer the host half scans. Long
+     * sides are capped so a full-screen screenshot stays a reasonable payload.
+     */
+    async function imageFileToGray(file, maxSide = 1400) {
+      const url = URL.createObjectURL(file)
+      try {
+        const image = new Image()
+        image.src = url
+        await image.decode()
+        const sourceWidth = image.naturalWidth || image.width
+        const sourceHeight = image.naturalHeight || image.height
+        if (!sourceWidth || !sourceHeight) throw new Error('image-decode-failed')
+        const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight))
+        const width = Math.max(1, Math.round(sourceWidth * scale))
+        const height = Math.max(1, Math.round(sourceHeight * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const context = canvas.getContext('2d', { willReadFrequently: true })
+        if (!context) throw new Error('canvas-unavailable')
+        context.drawImage(image, 0, 0, width, height)
+        const { data } = context.getImageData(0, 0, width, height)
+        const gray = new Uint8Array(width * height)
+        for (let i = 0, p = 0; i < gray.length; i += 1, p += 4) {
+          gray[i] = Math.round(0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2])
+        }
+        return { width, height, gray }
+      } finally {
+        URL.revokeObjectURL(url)
+      }
     }
 
     /** A request always resolves, so a hung network call can never freeze the tab. */
@@ -195,6 +322,14 @@ window.__ModuleLoader__.load({
       const [pending, setPending] = React.useState(null)
       const [selection, setSelection] = React.useState(false)
       const [requestId, setRequestId] = React.useState('')
+      const [qr, setQr] = React.useState(null)
+      const [qrBusy, setQrBusy] = React.useState(false)
+      const [menuOpen, setMenuOpen] = React.useState(false)
+      const [scanBusy, setScanBusy] = React.useState(false)
+      const [dragging, setDragging] = React.useState(false)
+      const fileInput = React.useRef(null)
+      const rootRef = React.useRef(null)
+      const scanRef = React.useRef(null)
 
       const trimmed = code.trim()
       const parsed = preview !== null && parsedCode !== '' && parsedCode === trimmed
@@ -205,6 +340,7 @@ window.__ModuleLoader__.load({
         setParsedCode('')
         setPending(null)
         setSelection(false)
+        setQr(null)
       }
 
       const newRequestId = () => {
@@ -283,27 +419,133 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const parse = async () => {
+      const parseCode = async (value, { quiet = false } = {}) => {
+        const text = value.trim()
         setBusy(true)
-        setStatus(null)
+        if (!quiet) setStatus(null)
         try {
-          const result = await request('parse', { code: trimmed })
+          const result = await request('parse', { code: text })
           if (result.ok && result.preview) {
             setPreview(result.preview)
-            setParsedCode(trimmed)
+            setParsedCode(text)
             setPending(null)
             setSelection(result.selection === true)
-          } else {
-            clear()
-            setStatus({
-              kind: 'error',
-              text: `${t('failure')}: ${result.error}${result.httpStatus ? ` (HTTP ${result.httpStatus})` : ''}`,
-            })
+            return true
           }
+          clear()
+          setStatus({
+            kind: 'error',
+            text: `${t('failure')}: ${result.error}${result.httpStatus ? ` (HTTP ${result.httpStatus})` : ''}`,
+          })
+          return false
         } finally {
           setBusy(false)
         }
       }
+
+      const parse = () => parseCode(trimmed)
+
+      /** Read a QR image, put the code in the box and parse it right away. */
+      const scanImageFile = async (file) => {
+        if (!file) return
+        setScanBusy(true)
+        setStatus(null)
+        try {
+          const { width, height, gray } = await imageFileToGray(file)
+          const result = await request('scan', { width, height, gray: toBase64(gray) })
+          if (result.ok && result.code) {
+            setCode(result.code)
+            setQr(null)
+            const parsedOk = await parseCode(result.code, { quiet: true })
+            setStatus({
+              kind: parsedOk ? 'ok' : 'error',
+              text: parsedOk ? `${t('scanDone')} · ${result.entries} ${t('willRun')}` : t('failure'),
+            })
+            return
+          }
+          const reason = result.error === 'qr-not-found'
+            ? t('scanNotFound')
+            : result.error === 'qr-not-a-share-code'
+              ? t('scanNotCode')
+              : result.error === 'qr-unreadable'
+                ? t('scanUnreadable')
+                : result.error === 'qr-image-too-small'
+                  ? t('scanTooSmall')
+                  : t('scanBadImage')
+          setStatus({ kind: 'error', text: reason })
+        } catch (error) {
+          setStatus({ kind: 'error', text: `${t('scanBadImage')}: ${error.message}` })
+        } finally {
+          setScanBusy(false)
+        }
+      }
+      scanRef.current = scanImageFile
+
+      /**
+       * Claim a file drag over this panel before the host page sees it.
+       *
+       * The DSH shell listens for drags on `document` to offer its attachment
+       * drop zone. In a settings dialog there is no composer to accept a file,
+       * so it sets `dropEffect = 'none'` — and per spec a drag whose drop effect
+       * is `none` fires no `drop` event at all, so a plain `onDrop` here never
+       * runs and the image is silently swallowed.
+       *
+       * Window capture runs before those document listeners, so a drag that is
+       * over this panel is claimed here: propagation stops, the drop effect goes
+       * back to `copy`, and the file reaches `scanImageFile`. Drags anywhere
+       * else are left untouched for the shell to handle as usual.
+       */
+      React.useEffect(() => {
+        const root = rootRef.current
+        if (!root || typeof window === 'undefined') return undefined
+        const carriesFiles = (event) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
+        const pointInside = (event) => {
+          if (!event.clientX && !event.clientY) return false
+          const rect = root.getBoundingClientRect()
+          return event.clientX >= rect.left && event.clientX <= rect.right
+            && event.clientY >= rect.top && event.clientY <= rect.bottom
+        }
+        const claimed = (event) => carriesFiles(event) && (root.contains(event.target) || pointInside(event))
+        const onEnter = (event) => {
+          if (!claimed(event)) return
+          event.preventDefault()
+          event.stopPropagation()
+          setDragging(true)
+        }
+        const onOver = (event) => {
+          if (!claimed(event)) return
+          event.preventDefault()
+          event.stopPropagation()
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+          setDragging(true)
+        }
+        const onLeave = (event) => {
+          if (!carriesFiles(event)) return
+          if (event.relatedTarget && root.contains(event.relatedTarget)) return
+          setDragging(false)
+        }
+        const onDrop = (event) => {
+          if (!claimed(event)) return
+          event.preventDefault()
+          event.stopPropagation()
+          setDragging(false)
+          const file = event.dataTransfer?.files?.[0]
+          if (file) scanRef.current?.(file)
+        }
+        const onEnd = () => setDragging(false)
+        window.addEventListener('dragenter', onEnter, true)
+        window.addEventListener('dragover', onOver, true)
+        window.addEventListener('dragleave', onLeave, true)
+        window.addEventListener('drop', onDrop, true)
+        window.addEventListener('dragend', onEnd, true)
+        return () => {
+          window.removeEventListener('dragenter', onEnter, true)
+          window.removeEventListener('dragover', onOver, true)
+          window.removeEventListener('dragleave', onLeave, true)
+          window.removeEventListener('drop', onDrop, true)
+          window.removeEventListener('dragend', onEnd, true)
+        }
+      }, [])
 
       const cancel = () => request('cancel', { requestId })
 
@@ -311,6 +553,74 @@ window.__ModuleLoader__.load({
         try {
           await navigator.clipboard.writeText(code)
           setStatus({ kind: 'ok', text: t('copied') })
+        } catch (error) {
+          setStatus({ kind: 'error', text: `${t('failure')}: ${error.message}` })
+        }
+      }
+
+      const toggleQr = async () => {
+        if (qr) {
+          setQr(null)
+          return
+        }
+        setQrBusy(true)
+        setStatus(null)
+        try {
+          const result = await request('qr', { code: trimmed })
+          if (result.ok && Array.isArray(result.modules)) {
+            setQr({ size: result.size, modules: result.modules, version: result.version, level: result.level })
+          } else {
+            setStatus({
+              kind: 'error',
+              text: `${t('failure')}: ${result.error === 'code-too-long-for-qr' ? t('qrTooLong') : result.error}`,
+            })
+          }
+        } finally {
+          setQrBusy(false)
+        }
+      }
+
+      const saveQr = () => {
+        if (!qr) return
+        try {
+          downloadBlob(new Blob([qrSvgSource(qr)], { type: 'image/svg+xml' }), 'dsh-plugin-share-code.svg')
+        } catch (error) {
+          setStatus({ kind: 'error', text: `${t('failure')}: ${error.message}` })
+        }
+      }
+
+      /** The same symbol as a bitmap, for chat apps that do not show SVG. */
+      const saveQrPng = () => {
+        if (!qr) return
+        try {
+          const pixelsPerModule = 8
+          const side = (qr.size + QR_QUIET_ZONE * 2) * pixelsPerModule
+          const canvas = document.createElement('canvas')
+          canvas.width = side
+          canvas.height = side
+          const context = canvas.getContext('2d')
+          if (!context) throw new Error('canvas-unavailable')
+          context.fillStyle = '#ffffff'
+          context.fillRect(0, 0, side, side)
+          context.fillStyle = '#000000'
+          for (let row = 0; row < qr.size; row += 1) {
+            for (let col = 0; col < qr.size; col += 1) {
+              if (qr.modules[row][col] !== '1') continue
+              context.fillRect(
+                (col + QR_QUIET_ZONE) * pixelsPerModule,
+                (row + QR_QUIET_ZONE) * pixelsPerModule,
+                pixelsPerModule,
+                pixelsPerModule,
+              )
+            }
+          }
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              setStatus({ kind: 'error', text: `${t('failure')}: png-encode-failed` })
+              return
+            }
+            downloadBlob(blob, 'dsh-plugin-share-code.png')
+          }, 'image/png')
         } catch (error) {
           setStatus({ kind: 'error', text: `${t('failure')}: ${error.message}` })
         }
@@ -329,7 +639,7 @@ window.__ModuleLoader__.load({
                 ? t('hostOld')
                 : `${t('total')} ${preview.length} · ${pendingRows} ${t('willRun')} · ${t('hintSingle')}`
 
-      return h('section', { className: 'dps-root' },
+      return h('section', { ref: rootRef, className: dragging ? 'dps-root dps-dropping' : 'dps-root' },
         h('p', { className: 'dps-intro' }, t('intro')),
         h('div', { className: 'dps-toolbar' },
           h(Button, { variant: 'outline', size: 'md', disabled: busy, onClick: exportCurrent }, t('export')),
@@ -341,13 +651,49 @@ window.__ModuleLoader__.load({
           }, t('parse')),
           h(Button, { variant: 'ghost', size: 'md', disabled: busy || !trimmed, onClick: copy }, t('copy')),
           h(Button, {
+            variant: 'ghost',
+            size: 'md',
+            disabled: busy || qrBusy || !trimmed,
+            onClick: toggleQr,
+          }, qr ? t('qrHide') : t('qr')),
+          h(Menu, {
+            open: menuOpen,
+            anchor: h(Button, {
+              variant: 'ghost',
+              size: 'md',
+              disabled: busy || scanBusy,
+              onClick: () => setMenuOpen((open) => !open),
+            }, scanBusy ? t('scanBusy') : t('scan')),
+            items: [
+              { type: 'label', id: 'scan-hint', text: t('scanDropHint') },
+              { id: 'scan-file', label: t('scanFromFile') },
+            ],
+            onSelect: (id) => {
+              setMenuOpen(false)
+              if (id === 'scan-file') fileInput.current?.click()
+            },
+            onClose: () => setMenuOpen(false),
+            align: 'start',
+          }),
+          h('input', {
+            ref: fileInput,
+            type: 'file',
+            accept: 'image/*',
+            style: { display: 'none' },
+            onChange: (event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              if (file) scanImageFile(file)
+            },
+          }),
+          h(Button, {
             variant: parsed && pendingRows > 0 ? 'primary' : 'outline',
             size: 'md',
             disabled: busy || !parsed || pendingRows === 0,
             onClick: () => apply(null),
           }, t('installAll')),
           busy ? h(Button, { variant: 'ghost', size: 'md', disabled: !requestId, onClick: cancel }, t('cancel')) : null),
-        h('p', { className: 'dps-hint' }, hint),
+        h('p', { className: 'dps-hint' }, dragging ? t('scanDrop') : hint),
         status ? h('p', { className: 'dps-status', role: 'status', 'aria-live': 'polite' },
           h(Tag, { tone: status.kind === 'error' ? 'danger' : 'success' }, status.kind === 'error' ? t('failedTag') : t('doneTag')),
           h('span', { className: status.kind === 'error' ? 'dps-statusError' : 'dps-statusOk' }, status.text)) : null,
@@ -363,6 +709,24 @@ window.__ModuleLoader__.load({
           spellCheck: false,
           rows: 5,
         }),
+        qr ? h('div', { className: 'dps-qr' },
+          h('div', { className: 'dps-qrCanvas' },
+            h('svg', {
+              viewBox: `0 0 ${qrExtent(qr.size)} ${qrExtent(qr.size)}`,
+              width: 208,
+              height: 208,
+              shapeRendering: 'crispEdges',
+              role: 'img',
+              'aria-label': t('qrAlt'),
+            },
+            h('rect', { width: qrExtent(qr.size), height: qrExtent(qr.size), fill: '#ffffff' }),
+            h('path', { d: qrPath(qr.modules), fill: '#000000' }))),
+          h('div', { className: 'dps-qrSide' },
+            h('p', { className: 'dps-qrMeta' }, `${t('qrVersion')} ${qr.version} · ${qr.size}×${qr.size}`),
+            h('p', { className: 'dps-hint' }, t('qrNote')),
+            h('div', { className: 'dps-qrActions' },
+              h(Button, { variant: 'outline', size: 'sm', onClick: saveQr }, t('qrSave')),
+              h(Button, { variant: 'outline', size: 'sm', onClick: saveQrPng }, t('qrSavePng'))))) : null,
         preview ? h('div', null,
           h('h3', { className: 'dps-heading' }, t('entries')),
           h(Preview, {

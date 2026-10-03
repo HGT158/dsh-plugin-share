@@ -35,7 +35,7 @@ Click **Export current profile** → the box fills with a code starting with `D1
 
 You can also click **Show QR code** to draw that code as a scannable symbol (click **Hide QR code** to put it away); the panel shows its version and size, and **Save SVG** (vector, sharp at any scale) or **Save PNG** (bitmap, previews everywhere) keeps a copy.
 
-![QR code panel](docs/plugin-share-qr.png)
+![QR code panel](docs/plugin-share-qr-en.png)
 
 **② Import — install someone else's code on this machine**
 
@@ -84,6 +84,7 @@ dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#v0.1.0'
 
 ## Security
 
+- **Every route passes DSH's trust fence first** — each share request asks the composition's `connection` service (`requestRejection`) before anything else: its Host/Origin check defeats DNS rebinding and cross-site calls, and its browser authentication verifies the login token. An unauthenticated local process or web page gets a flat 401 — it cannot read your plugin list and cannot reach the install path. The check runs before the request body is even read.
 - **A code is not a signature** — the CRC32 only catches copy or truncation damage. It **does not** prove authenticity and cannot stop tampering. Check every source in the preview before installing.
 - **Source allowlist** — only npm packages, `github:owner/repo[#ref]`, and official optional DSH builtin bundles. Local paths, `file:`, `link:`, `portal:`, `workspace:`, arbitrary HTTP(S) tarballs, and `git+…` / `git@` / `ssh://` remotes are all refused.
 - **Sources stay visible** — every row names its source (`npm` / `github.com` / `builtin`) and shows the full install spec such as `github:owner/repo#v1.2.3`, so you can confirm it is the repository you expect.
@@ -119,7 +120,7 @@ It targets **upright, clean QR images**: files this plugin saved, a screenshot s
 ## Development
 
 ```powershell
-npm test                        # codec + collector + import transaction + QR + scanner, 32 tests
+npm test                        # codec + collector + import transaction + QR + scanner + route fence, 35 tests
 pnpm pack --dry-run             # inspect what would be published
 npm run encode:example          # build a code from examples/plugins.json
 node src/cli.mjs decode D1...   # decode from the command line

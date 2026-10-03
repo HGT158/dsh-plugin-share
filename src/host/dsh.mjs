@@ -243,19 +243,43 @@ async function handle(req, res, pluginManager) {
   sendJson(res, 404, { ok: false, error: 'route-not-found' })
 }
 
-export const inject = ['webServer', 'pluginManager']
+export const inject = ['webServer', 'pluginManager', 'connection']
+
+/**
+ * Ask the composition's trust fence before doing any work.
+ *
+ * `webServer.register` alone gives a route with no caller check, so an
+ * unauthenticated request from any local process — or a cross-site one from a
+ * page the user happens to have open — reached the share workflow. Every
+ * shipped route plugin asks `connection.requestRejection` first instead: its
+ * Host/Origin fence defeats DNS rebinding and cross-site calls, and its browser
+ * authentication covers the login token. This runs before the body is read and
+ * before the plugin manager is touched, so a rejected caller learns nothing.
+ *
+ * @returns true when the request was refused and the response is already owned.
+ */
+function rejectUntrusted(ctx, req, res) {
+  const rejection = ctx.connection.requestRejection(req)
+  if (rejection === undefined) return false
+  res.statusCode = rejection
+  res.end()
+  return true
+}
 
 /** DSH Host half: exposes the local D1 share workflow over same-origin routes. */
 export function apply(ctx) {
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: ROUTE,
-    handler: (req, res) => handle(req, res, ctx.pluginManager).catch((error) => {
-      if (res.headersSent) {
-        res.destroy(error)
-        return
-      }
-      sendJson(res, error.status ?? 500, { ok: false, error: error.code ?? error.message ?? 'plugin-share-failed' })
-    }),
+    handler: (req, res) => {
+      if (rejectUntrusted(ctx, req, res)) return undefined
+      return handle(req, res, ctx.pluginManager).catch((error) => {
+        if (res.headersSent) {
+          res.destroy(error)
+          return
+        }
+        sendJson(res, error.status ?? 500, { ok: false, error: error.code ?? error.message ?? 'plugin-share-failed' })
+      })
+    },
   }), 'dsh-plugin-share: routes')
 }

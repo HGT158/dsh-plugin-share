@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { collectEntries } from '../src/host/collect.mjs'
 import { applyPreview, previewEntries, selectPreview } from '../src/host/import.mjs'
+import { apply, inject } from '../src/host/dsh.mjs'
 
 test('collector exports portable removable bundles and optional builtins', () => {
   const result = collectEntries({
@@ -162,4 +163,89 @@ test('applyPreview treats manager failure results as failed imports', async () =
   assert.equal(result.ok, false)
   assert.equal(result.error, 'network')
   assert.equal(result.operation.application, 'failed')
+})
+
+/** Minimal ServerResponse stand-in: only what the host half touches. */
+function fakeResponse() {
+  return {
+    statusCode: 0,
+    headersSent: false,
+    headers: {},
+    writeHead(status, headers) {
+      this.statusCode = status
+      this.headersSent = true
+      Object.assign(this.headers, headers ?? {})
+      return this
+    },
+    setHeader(name, value) {
+      this.headers[name] = value
+    },
+    end(body) {
+      this.body = body ?? ''
+      return this
+    },
+  }
+}
+
+/** Register the plugin against a fake context and hand back the route handler. */
+function registerRoute({ rejection }) {
+  let handler = null
+  const asked = []
+  const ctx = {
+    connection: {
+      requestRejection(request) {
+        asked.push(request.headers)
+        return rejection
+      },
+    },
+    pluginManager: {
+      listBundles() {
+        throw new Error('the plugin manager must not be reached before the trust fence')
+      },
+    },
+    effect(callback) {
+      callback()
+    },
+    webServer: {
+      register(route) {
+        handler = route.handler
+        return () => {}
+      },
+    },
+  }
+  apply(ctx)
+  return { handler, asked }
+}
+
+test('routes are registered behind the connection trust fence', async () => {
+  const { handler, asked } = registerRoute({ rejection: 401 })
+  assert.equal(typeof handler, 'function')
+  const response = fakeResponse()
+  await handler({ method: 'GET', url: '/api/plugin-share/state', headers: { host: 'evil.example' } }, response)
+  // The refusal owns the response and nothing downstream ran.
+  assert.equal(response.statusCode, 401)
+  assert.equal(response.body, '')
+  assert.deepEqual(asked, [{ host: 'evil.example' }])
+})
+
+test('an admitted caller reaches the share routes', async () => {
+  const { handler } = registerRoute({ rejection: undefined })
+  const response = fakeResponse()
+  // Async-iterable so the route can read an (empty) body, exactly as it does
+  // for a real request.
+  const request = {
+    method: 'POST',
+    url: '/api/plugin-share/no-such-action',
+    headers: { host: '127.0.0.1:19388' },
+    async *[Symbol.asyncIterator]() {},
+  }
+  await handler(request, response)
+  assert.equal(response.statusCode, 404)
+  assert.equal(JSON.parse(response.body).error, 'route-not-found')
+})
+
+test('the host half declares the connection dependency it fences with', () => {
+  assert.ok(inject.includes('connection'), 'connection must be injected, not read opportunistically')
+  assert.ok(inject.includes('webServer'))
+  assert.ok(inject.includes('pluginManager'))
 })

@@ -84,6 +84,7 @@ dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#v0.1.0'
 
 ## 安全
 
+- **每个接口都先过 DSH 的信任闸** — 分享接口的请求一律先问组合的 `connection` 服务（`requestRejection`）：Host/Origin 校验挡掉 DNS rebinding 与跨站调用，浏览器鉴权校验登录 token。没有凭据的本机进程或网页只会拿到 401——读不到你的插件清单，更碰不到安装那条路；这道检查在读请求体之前执行。
 - **码不是签名** — CRC32 只用来发现复制/截断造成的损坏，**不能防篡改**，也不证明来源。请核对预览里的每个来源再装。
 - **来源白名单** — 只接受 npm 包、`github:owner/repo[#ref]`、DSH 官方可选 builtin。本地路径、`file:`、`link:`、`portal:`、`workspace:`、任意 HTTP(S) tarball、`git+…` / `git@` / `ssh://` 一律拒绝。
 - **来源全程可见** — 每行都标明来源（`npm` / `github.com` / `builtin`）并列出完整安装规格（如 `github:owner/repo#v1.2.3`），GitHub 来源显示域名，方便你确认是不是官方仓库。
@@ -119,7 +120,7 @@ Host 半的改动要重启 dsh 生效；客户端 bundle 有版本缓存，浏�
 ## 开发
 
 ```powershell
-npm test                        # 编解码 + 采集 + 导入事务 + 二维码，共 32 项
+npm test                        # 编解码 + 采集 + 导入事务 + 二维码 + 扫码 + 路由鉴权，共 35 项
 pnpm pack --dry-run             # 检查发布内容
 npm run encode:example          # 用 examples/plugins.json 生成一个码
 node src/cli.mjs decode D1...   # 命令行解码

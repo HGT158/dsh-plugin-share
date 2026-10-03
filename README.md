@@ -79,7 +79,7 @@ dsh --profile web
 想固定版本（可复现），改用 tag：
 
 ```powershell
-dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#v0.1.0'
+dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#v0.2.0'
 ```
 
 ## 安全

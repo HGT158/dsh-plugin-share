@@ -274,6 +274,16 @@ pnpm pack --dry-run
 
 `pnpm pack --dry-run` 必须显示 package name 为 `dsh-plugin-share`，且不把测试、研究原稿、锁文件、本机配置或凭据打进包。
 
+## 9.5 对外声明：兼容性与上架
+
+插件市场（`dsh-market` 应用 + `awesome-dsh-plugin` 目录）读的是**仓库里的清单**，不是任何自拟的报告，因此以下字段属于对外契约，`test/manifest.test.mjs` 会钉住它们：
+
+- **`dsh.bundle.patch`** —— 目录仓库的第一道 CI 就是抓取仓库的 `package.json` 校验它；只声明 `dsh.client` 会被直接打回，因为那样无法 `dsh plugin add`。同时 `cordis.patch.yml` 必须在 `files` 里，否则发布的包缺补丁。
+- **`@deepseek-ai/dsh-*` 的 `peerDependencies`** —— dsh 自己的兼容闸门（`dsh-app-boot`）会拿 **dsh 运行时版本**去逐个比对声明的范围（`semver.satisfies(runtimeVersion, range, { includePrerelease: true })`），不满足就拒绝加载并给出豁免命令；市场的 host-aware 筛选读同一份声明。没有声明＝没有任何拦截保护。
+- 范围必须**显式写出预发布分支**：node-semver 只在「范围里某个比较符与该版本的 `major.minor.patch` 元组完全一致、且自身也带预发布标签」时才放行预发布版本。所以 `^0.2.0-rc.2` 在 DSH 闸门下能放行 `0.2.1-rc.1`，在 npm 默认语义下却不能。当前采用的写法是 `>=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.1 <0.3.0-0`：两种语义下都覆盖 dsh 0.2 全线（含预发布），并挡住 0.1.x 与 0.3.x。改这个字符串前先跑一遍 semver 对照。
+- **`screenshots.json`** —— 目录约定：截图**声明在自己仓库里**（1–8 张、相对路径、不得跳出插件目录），因此换图只需推自己的仓库，不必去目录仓库提 PR，也不会与别人冲突。未声明时市场退回从 README 自动抽取。
+- 目录投稿是**一个文件**：`data/plugins/<owner>__<repo>.yml`（`url` / `name` / `category` / `description.en|zh`），一个 PR 最多 3 条；CI 依次检查条目数、`dsh.bundle`、仓库年龄（≥1 天）与 awesome-lint。纯聚合包（只有依赖清单、自身无行为）不予收录；本插件自带宿主与客户端行为，不属于该类。
+
 ## 10. 已知限制与后续方向
 
 1. D1 没有签名；CRC 不能防恶意伪造。

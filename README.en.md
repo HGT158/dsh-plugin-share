@@ -12,7 +12,7 @@ Turn "which plugins I have installed" into a pasteable **offline share code** �
 [![release](https://img.shields.io/github/v/tag/HGT158/dsh-plugin-share?style=flat)](https://github.com/HGT158/dsh-plugin-share/tags)
 [![DSH bundle](https://img.shields.io/badge/DSH-bundle-4f46e5)](https://deepseek-harness.github.io/deepseek-harness/develop/basic/publish)
 
-![Plugin share tab](docs/plugin-share-tab-en.png)
+![Plugin share tab](https://raw.githubusercontent.com/HGT158/dsh-plugin-share/main/docs/plugin-share-tab-en.png)
 
 ## Install
 
@@ -25,6 +25,8 @@ Open Harness Web → **Settings → Built-in plugins → Plugin share**.
 
 The package is plain JS with zero dependencies and no build step, so the install **never asks you to approve a build script**. Both sides need it — the code is just text; this plugin is the interface that exports and pastes it.
 
+The plugin also declares an official package as a `peerDependencies` entry (`@deepseek-ai/dsh-client-ui-settings-plugins`, covering the dsh 0.2 line), so a host outside that range is **refused at install or boot** with the reason and the remedy instead of failing quietly later.
+
 Verified on `dsh 0.2.0-rc.2` with the Web profile (`@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app`). The desktop profile is managed by the desktop app itself and cannot be installed into from the CLI.
 
 ## How to use it
@@ -35,7 +37,7 @@ Click **Export current profile** → the box fills with a code starting with `D1
 
 You can also click **Show QR code** to draw that code as a scannable symbol (click **Hide QR code** to put it away); the panel shows its version and size, and **Save SVG** (vector, sharp at any scale) or **Save PNG** (bitmap, previews everywhere) keeps a copy.
 
-![QR code panel](docs/plugin-share-qr-en.png)
+![QR code panel](https://raw.githubusercontent.com/HGT158/dsh-plugin-share/main/docs/plugin-share-qr-en.png)
 
 **② Import — install someone else's code on this machine**
 
@@ -120,7 +122,7 @@ It targets **upright, clean QR images**: files this plugin saved, a screenshot s
 ## Development
 
 ```powershell
-npm test                        # codec + collector + import transaction + QR + scanner + route fence, 37 tests
+npm test                        # codec + collector + import transaction + QR + scanner + route fence + manifest guards, 40 tests
 pnpm pack --dry-run             # inspect what would be published
 npm run encode:example          # build a code from examples/plugins.json
 node src/cli.mjs decode D1...   # decode from the command line

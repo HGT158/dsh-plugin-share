@@ -12,7 +12,7 @@
 [![release](https://img.shields.io/github/v/tag/HGT158/dsh-plugin-share?style=flat)](https://github.com/HGT158/dsh-plugin-share/tags)
 [![DSH bundle](https://img.shields.io/badge/DSH-bundle-4f46e5)](https://deepseek-harness.github.io/deepseek-harness/develop/basic/publish)
 
-![插件分享标签页](docs/plugin-share-tab.png)
+![插件分享标签页](https://raw.githubusercontent.com/HGT158/dsh-plugin-share/main/docs/plugin-share-tab.png)
 
 ## 安装
 
@@ -25,6 +25,8 @@ dsh --profile web
 
 这个包是纯 JS、零依赖、没有构建脚本，所以安装时**不会要求你批准任何 build script**，装完即用。分享方和接收方都需要装它——码本身只是文本，导出和粘贴导入的界面由它提供。
 
+插件还把官方包声明为 `peerDependencies`（`@deepseek-ai/dsh-client-ui-settings-plugins`，范围覆盖 dsh 0.2.x）：宿主版本不在范围内时，dsh 会在安装或启动时**明确拦下**并给出处理方式，而不是装完才发现不对。
+
 已验证环境：`dsh 0.2.0-rc.2` + Web profile（`@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app`）。桌面 profile 由桌面 App 自行管理，CLI 装不进去。
 
 ## 怎么用
@@ -35,7 +37,7 @@ dsh --profile web
 
 也可以点「展示二维码」，把当前这段码画成手机可扫的二维码（再点一次「收起二维码」收起）；面板里显示版本与尺寸，可点「保存 SVG」（矢量，放大不糊）或「保存 PNG」（位图，聊天工具里到处都能预览）。
 
-![二维码面板](docs/plugin-share-qr.png)
+![二维码面板](https://raw.githubusercontent.com/HGT158/dsh-plugin-share/main/docs/plugin-share-qr.png)
 
 **② 导入：把别人的码装到本机**
 
@@ -120,7 +122,7 @@ Host 半的改动要重启 dsh 生效；客户端 bundle 有版本缓存，浏�
 ## 开发
 
 ```powershell
-npm test                        # 编解码 + 采集 + 导入事务 + 二维码 + 扫码 + 路由鉴权，共 37 项
+npm test                        # 编解码 + 采集 + 导入事务 + 二维码 + 扫码 + 路由鉴权，共 40 项
 pnpm pack --dry-run             # 检查发布内容
 npm run encode:example          # 用 examples/plugins.json 生成一个码
 node src/cli.mjs decode D1...   # 命令行解码

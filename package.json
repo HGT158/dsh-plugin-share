@@ -6,6 +6,23 @@
   "type": "module",
   "main": "./src/index.mjs",
   "icon": "./icon.svg",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HGT158/dsh-plugin-share.git"
+  },
+  "homepage": "https://github.com/HGT158/dsh-plugin-share#readme",
+  "bugs": {
+    "url": "https://github.com/HGT158/dsh-plugin-share/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "plugin-share"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org"
+  },
   "exports": {
     ".": "./src/index.mjs",
     "./client": "./src/client.js",
@@ -20,6 +37,9 @@
     "README.md",
     "PLAN.md"
   ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-ui-settings-plugins": ">=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.1 <0.3.0-0"
+  },
   "dsh": {
     "manifestVersion": 1,
     "bundle": {

@@ -216,6 +216,8 @@ Host 路由为 `/api/plugin-share`：
 
 界面文案有一条硬约束：`t('key')` 用到的每个 key 都必须在 zh / en 两份字典里存在。DSH 的 locale 服务没有语言回退，缺 key 会直接把 key 渲染到界面上——`test/client-locale.test.mjs` 加载真实的客户端模块取回字典并做双向比对，正是为了拦住这一类问题。
 
+失败信息同样不能只给一个代号。安装失败时插件管理器返回的是 `operation-error` 加上包管理器自己的诊断（一段先有 lockfile 校验、再有真正错误、最后给补救建议的转写稿）。界面必须把诊断呈现出来，并裁掉前面的噪声、保留错误与 `help:` 建议；没有诊断时退回包结果里的 `kind`，再退回错误码。这条规则由 `failureReason` 实现并单独测试——实测中它把 `operation-error` 变成了「ERR_PNPM_NO_MATCHING_VERSION + 找不到 @liustack/modlens@0.3.1 + 最新版是 3.26.6」。
+
 ## 8. 隐私与安全检查
 
 发布前检查公开文件，而不是只检查运行时输入：

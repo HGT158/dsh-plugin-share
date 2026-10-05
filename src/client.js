@@ -15,8 +15,8 @@ window.__ModuleLoader__.load({
 .dps-intro{margin:0;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-tertiary)}
 .dps-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .dps-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
-.dps-status{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;line-height:20px}
-.dps-statusError{color:var(--dsw-alias-state-error-primary)}
+.dps-status{display:flex;align-items:flex-start;gap:8px;margin:0;font-size:13px;line-height:20px}
+.dps-statusError{color:var(--dsw-alias-state-error-primary);white-space:pre-line}
 .dps-statusOk{color:var(--dsw-alias-label-secondary)}
 .dps-code{box-sizing:border-box;width:100%;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:1.6;resize:vertical}
 .dps-code:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:2px}
@@ -196,6 +196,41 @@ window.__ModuleLoader__.load({
 
     function qrExtent(size) {
       return (size + QR_QUIET_ZONE * 2) * QR_MODULE_SIZE
+    }
+
+    /**
+     * Turn a failed import into something a human can act on.
+     *
+     * The plugin manager answers a failed install with a bare `operation-error`
+     * plus the package manager's own diagnostic, which is a full transcript:
+     * lockfile chatter first, then the actual failure, then the remedy. Showing
+     * only the code leaves the user with nothing to do, and showing the whole
+     * transcript buries the reason, so the transcript is cut down to the part
+     * that carries the error and its suggestion.
+     */
+    function failureReason(result) {
+      if (!result || typeof result !== 'object') return ''
+      const operation = result.operation
+      const diagnostic = operation?.error?.diagnostic
+      if (typeof diagnostic === 'string' && diagnostic.trim() !== '') {
+        const lines = diagnostic
+          .replace(/\u001b\[[0-9;]*m/gu, '')
+          .split(/\r?\n/u)
+          .map((line) => line.trimEnd())
+          .filter((line) => line.trim() !== '' && !/^(\?|✓|✗|Progress:|Packages:|Done in|dependencies:|\+ |\[WARN\])/u.test(line.trim()))
+        const start = lines.findIndex((line) => /^(Error|ERR_|×|╰─▶)/u.test(line.trim()))
+        const tail = start === -1 ? lines : lines.slice(start)
+        const kept = tail.slice(0, 4)
+        // The package manager puts the remedy on its own `help:` line, usually
+        // just past the truncated part — keep it even when it falls outside.
+        const help = tail.slice(0, 8).find((line) => /^help:/u.test(line.trim()))
+        if (help !== undefined && !kept.includes(help)) kept.push(help)
+        const reason = kept.join('\n').trim()
+        return reason === '' ? result.error : reason
+      }
+      const kind = operation?.packageResult?.kind
+      if (operation?.application === 'failed' && typeof kind === 'string') return kind
+      return result.error
     }
 
     /** The same symbol as the on-screen one, as a file the user can keep. */
@@ -391,7 +426,7 @@ window.__ModuleLoader__.load({
           }
           setStatus({
             kind: 'error',
-            text: `${t('failure')}: ${result.error}${result.httpStatus ? ` (HTTP ${result.httpStatus})` : ''}`,
+            text: `${t('failure')}: ${failureReason(result)}`,
           })
         } finally {
           setBusy(false)
@@ -750,6 +785,9 @@ window.__ModuleLoader__.load({
 
     return {
       inject: ['slots', 'locale'],
+      // Pure and worth pinning down: exposed so the tests can check exactly how
+      // a failed import is worded, without mounting the tab.
+      failureReason,
       apply(ctx) {
         const t = ctx.locale.bind(NS)
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-plugin-share: dictionaries')

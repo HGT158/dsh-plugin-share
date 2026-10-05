@@ -120,7 +120,7 @@ It targets **upright, clean QR images**: files this plugin saved, a screenshot s
 ## Development
 
 ```powershell
-npm test                        # codec + collector + import transaction + QR + scanner + route fence, 35 tests
+npm test                        # codec + collector + import transaction + QR + scanner + route fence, 37 tests
 pnpm pack --dry-run             # inspect what would be published
 npm run encode:example          # build a code from examples/plugins.json
 node src/cli.mjs decode D1...   # decode from the command line

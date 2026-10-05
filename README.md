@@ -120,7 +120,7 @@ Host 半的改动要重启 dsh 生效；客户端 bundle 有版本缓存，浏�
 ## 开发
 
 ```powershell
-npm test                        # 编解码 + 采集 + 导入事务 + 二维码 + 扫码 + 路由鉴权，共 35 项
+npm test                        # 编解码 + 采集 + 导入事务 + 二维码 + 扫码 + 路由鉴权，共 37 项
 pnpm pack --dry-run             # 检查发布内容
 npm run encode:example          # 用 examples/plugins.json 生成一个码
 node src/cli.mjs decode D1...   # 命令行解码

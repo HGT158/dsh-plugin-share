@@ -17,9 +17,16 @@ function loadClient() {
     let mod = null
     globalThis.window = { __ModuleLoader__: { load: (value) => { mod = value } } }
     await import('../src/client.js')
+    let state = []
+    let cursor = 0
+    let component
     const React = {
       createElement: (type, props, ...children) => ({ type, props, children }),
-      useState: (initial) => [initial, () => {}],
+      useState: (initial) => {
+        const index = cursor++
+        if (!(index in state)) state[index] = initial
+        return [state[index], (next) => { state[index] = typeof next === 'function' ? next(state[index]) : next }]
+      },
       useRef: (initial) => ({ current: initial }),
       useEffect: () => {},
     }
@@ -36,11 +43,18 @@ function loadClient() {
         register: (namespace, values) => { dictionaries[namespace] = values },
       },
       effect: (callback) => { callback() },
-      slots: { inject: (key, callback) => callback(), register: () => {} },
+      slots: { inject: (key, callback) => callback(), register: (_info, value) => { component = value } },
     }
     const plugin = mod.factory(require)
     plugin.apply(ctx)
-    return { plugin, dictionaries: dictionaries[Object.keys(dictionaries)[0]] }
+    return {
+      plugin,
+      dictionaries: dictionaries[Object.keys(dictionaries)[0]],
+      mountTab() {
+        state = []
+        return () => { cursor = 0; return component({ t: (key) => key }) }
+      },
+    }
   })()
   return loaded
 }
@@ -98,4 +112,60 @@ test('a failure without a diagnostic still says something specific', async () =>
   }), 'no-matching-version')
   assert.equal(plugin.failureReason({ ok: false, error: 'build-approval-required' }), 'build-approval-required')
   assert.equal(plugin.failureReason(undefined), '')
+})
+
+function* nodes(tree) {
+  if (!tree || typeof tree !== 'object') return
+  yield tree
+  // Expand the plugin's preview component while leaving primitive buttons as
+  // elements so their real event handlers and disabled flags can be exercised.
+  if (typeof tree.type === 'function' && tree.type.name === 'Preview') yield* nodes(tree.type(tree.props))
+  for (const child of (tree.children ?? []).flat(Infinity)) yield* nodes(child)
+}
+
+function button(tree, label) {
+  return [...nodes(tree)].find((node) => typeof node.props?.onClick === 'function' && node.children.includes(label))
+}
+
+test('export click handles absent or invalid skipped fields and shows an actual skipped count', async () => {
+  const { mountTab } = await loadClient()
+  const previousFetch = globalThis.fetch
+  try {
+    for (const skipped of [undefined, null, {}, [], [{ name: 'local' }]]) {
+      const render = mountTab()
+      globalThis.fetch = async () => ({ status: 200, text: async () => JSON.stringify({ ok: true, code: 'D1test', skipped }) })
+      await button(render(), 'export').props.onClick()
+      const tree = render()
+      const status = [...nodes(tree)].find((node) => node.props?.className === 'dps-statusOk')
+      assert.ok(status)
+      assert.ok(status.children.includes(Array.isArray(skipped) && skipped.length ? 'exported · 6 · 1 exportedSkipped' : 'exported · 6'))
+      assert.equal(button(tree, 'export').props.disabled, false)
+    }
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
+test('manual updates disable the row and the batch but keep other single installs available', async () => {
+  const { mountTab } = await loadClient()
+  const previousFetch = globalThis.fetch
+  const render = mountTab()
+  const preview = [
+    { index: 0, entry: { kind: 'npm', value: 'old', version: '2.0.0' }, spec: 'old@2.0.0', action: 'upgrade', verdict: { ok: false, reason: 'manual-update-required' } },
+    { index: 1, entry: { kind: 'npm', value: 'new', version: '1.0.0' }, spec: 'new@1.0.0', action: 'install', verdict: { ok: true } },
+  ]
+  try {
+    globalThis.fetch = async () => ({ status: 200, text: async () => JSON.stringify({ ok: true, selection: true, preview }) })
+    const input = [...nodes(render())].find((node) => node.type === 'textarea')
+    input.props.onChange({ target: { value: 'D1test' } })
+    await button(render(), 'parse').props.onClick()
+    const tree = render()
+    assert.equal(button(tree, 'rowManualUpdate').props.disabled, true)
+    assert.equal(button(tree, 'installAll').props.disabled, true)
+    assert.equal(button(tree, 'rowInstall').props.disabled, false)
+    assert.ok([...nodes(tree)].some((node) => node.children.includes('manualUpdateReason')))
+    assert.ok([...nodes(tree)].some((node) => node.children.includes('manualRequired')))
+  } finally {
+    globalThis.fetch = previousFetch
+  }
 })

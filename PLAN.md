@@ -96,16 +96,18 @@ version: null or validated version expression
 
 ## 5. 采集：导出哪些、怎么过滤
 
-Host 的 `collectEntries` 接收 `pluginManager.listBundles()` 的公开记录，以及由 bundle 记录组成的依赖映射；它不读取 `cordis.patch.yml`、配置文件、凭据文件或其他本机秘密文件。
+Host 的 `collectEntries` 接收 `pluginManager.listBundles()` 的公开记录，也支持调用方传入 manifest 形态的 `dependencies`；路由直接调用采集器，不再另造一份依赖映射。它不读取 `cordis.patch.yml`、配置文件、凭据文件或其他本机秘密文件。
 
 过滤规则：
 
 - `installed === true && removable === true` 的第三方 bundle 进入候选；
 - `listBundles()` 对 npm bundle 报告的 `source` 是 `name@range`，采集时先剥掉 `name@` 前缀，把它当成 manifest 里的版本范围处理；
+- 采集与预览共用 `src/host/bundles.mjs`：包名依次取非空的 `name` / `id` / `packageName`，来源取非空的 `spec` / `source` / `dependency`，版本取非空的 `version` / `resolvedVersion`；启用状态优先使用布尔值 `enabled`，其次 `active`。空字段不会遮住后续有效字段；
 - `optional === true && installed !== true` 的官方可选 bundle，仅在**已启用**且 `includeOptional` 开启时作为 builtin 进入；默认关闭的不导出（导出它们只会增加无意义的行）；
 - `removable === false` 的固定核心层跳过；
-- 缺失来源、别名、远端 Git、tarball、本地 spec 和不支持的依赖形状进入 `skipped`，不会进入分享码；
+- 来源缺失时可用已解析版本回退为 npm 条目；来源和版本都缺失、别名、远端 Git、tarball、本地 spec 和不支持的依赖形状进入 `skipped`，不会进入分享码；
 - `pin` 默认开启，用已解析的 bundle 版本锁定 npm 条目；关闭时保留跟随最新版本的语义；
+- 含空格的 npm 范围（如 `>=1 <2`）可以用已解析版本导出，也可在 `pin: false` 时导出跟随最新版本的条目；要求固定版本却没有已解析版本时进入 `skipped`，原因为 `dependency-version-unresolved`。线格式仍不允许空白，alias / URL / 控制字符仍拒绝；
 - enabled 状态始终保留，但不传播配置内容。
 
 导出前由 `encodeCode` 再次规范化所有公开条目，因此采集器的错误不会绕过输入校验。
@@ -129,6 +131,14 @@ Host 路由为 `/api/plugin-share`：
 - `POST /cancel`：按 request id 转发取消请求。
 
 预览匹配已安装 bundle 时同时认 `name` 与 `spec`/`source`/`dependency`：`listBundles()` 记录的来源字段叫 `source`，只认 `spec` 会把已安装的 GitHub 插件误判成待安装，进而让「全部安装」对自己的插件报 `already-installed`。
+
+GitHub 先按不区分大小写的 owner/repo 识别同一仓库，再优先选择 ref 完全一致的唯一记录（ref 区分大小写）；只有仓库一致而 ref 不同时属于已有包的来源变更，即使版本字符串相同也不能标记为 `skip`。无法唯一匹配时返回 `installed-source-ambiguous`。npm 同名包若来自 GitHub、alias 或本地路径，也属于来源变更。
+
+升级行还返回供手动操作的 `manualSpec`；GitHub 使用已匹配包名组成 `name@github:owner/repo#ref`，避免裸 GitHub 规格在 CLI 中成为错误依赖名。客户端在该行展示此规格。
+
+当前 DSH 的公开管理接口没有无损在线更新操作，带 HMR 的 `installBundle` 会直接拒绝已安装包。因此 `upgrade` 仅描述所需变更，其 `verdict` 为 `{ ok: false, reason: 'manual-update-required' }`，界面显示「需手动更新」并禁用该行。选中清单中存在升级或来源歧义时，`applyPreview` 在任何写操作前返回失败（`report` / `rollback` 均为空），`/import` 返回 409；客户端禁用「全部安装」，其他可执行行仍可单独处理。旧客户端或旧调用方传入 `verdict.ok: true` 的 `upgrade` 行也会被执行端拦下。不会通过卸载已有包或绕过 HMR 来实现更新。
+
+版本为 `null` 表示未指定版本：npm 按默认标签解析，GitHub 保留来源中的 ref，未指定 ref 时使用默认分支。接收端已安装该插件时，无法据此确认本地版本符合目标，因此同样走 `upgrade`：`verdict` 为 `{ ok: false, reason: 'manual-update-required' }`，并触发上面的整批预检查；未安装时按 `install` 正常安装。`manualSpec` 对 npm 条目就是包名本身（不带版本），对 GitHub 条目是 `已装包名@github:owner/repo#ref`。
 
 **每个请求都先过信任闸**：`ctx.webServer.register` 只负责挂载路由，本身不校验调用方，所以上面每个 action 在进入之前都必须先调 `ctx.connection.requestRejection(req)`（Host/Origin 校验 + 浏览器登录 token 鉴权），返回 401/403 时直接结束响应，**不读请求体、不碰 pluginManager**。宿主半因此 `inject` 里必须带 `connection`。少了这一步，本机任意进程或跨站页面都能读到插件清单，而 `/import` 是能往 profile 里装包的——这是实测出来的缺口（当时我们的路由无凭据返回 200，而官方插件同类路由一律 401）。
 
@@ -168,11 +178,11 @@ Host 路由为 `/api/plugin-share`：
 `applyPreview` 串行调用：
 
 - 安装调用 `installBundle(spec, { enabled, requestId, approvedBuilds })`；
-- builtin 状态变化调用 `setBundleEnabled`；
+- 状态变化调用 `setBundleEnabled`，目标使用已匹配 bundle 的实际包名；GitHub spec 不作为启停目标，回滚也复用同一包名；
 - 返回 `pendingBuilds` 且没有批准列表时立即停止，要求用户明确批准；
 - 失败或取消时停止，不静默继续；
-- 仅移除本次新安装的 bundle，并恢复本次改变过的 builtin enabled 状态；
-- 升级不自动调用破坏性的 `removeBundle`；
+- 仅移除本次新安装的 bundle，并恢复本次改变过的插件 enabled 状态；恢复被宿主拒绝时如实记录回滚失败；
+- 升级与歧义来源在批处理开始前拦下，不调用 `installBundle` 或 `removeBundle`；
 - 报告 `restart-required` 等宿主结果，不自动重启 DSH。
 
 ## 7. Web Client UI
@@ -190,7 +200,7 @@ Host 路由为 `/api/plugin-share`：
 - 导出当前 profile；
 - 粘贴并解析 D1；
 - 显示预览和拒绝原因；
-- **每一行都有自己的按钮**：`安装` / `升级` / `启用` / `停用`；已是最新或校验失败的行按钮禁用并说明原因；
+- **每一行都有自己的按钮**：`安装` / `需手动更新` / `启用` / `停用`；手动更新、已是当前状态或校验失败的行按钮禁用并说明原因；
 - 顶部另有 `全部安装`，一次应用所有待处理行（行为与逐行应用完全一致，只是选择集不同）；
 - 单行应用成功后自动重新解析，刷新该行的最新状态；
 - 显示构建脚本待批准项，并记住是哪一行触发的，批准后只重试那一行；
@@ -205,7 +215,7 @@ Host 路由为 `/api/plugin-share`：
 - 预览列表属于「已被解析的那段码」。文本框内容一旦改动或重新导出，预览立即清空，安装按钮随之禁用并提示需要重新解析；
 - 按钮下方常驻一行状态说明，区分「先在下面粘贴组合码」「再点击「解析组合码」」「组合码已改动，请重新解析」「正在处理…」和「共 N · M 项待处理」；
 - 成功或失败信息紧贴按钮显示，并带 `Tag`（`success` / `danger`），`role="status"` 播报，不依赖用户滚动到页面底部；
-- 每行显示插件名、来源 `Tag`、完整安装 spec 与动作文案（`安装` / `升级` / `启用` / `停用` / `已是当前版本`），便于防钓鱼核对。
+- 每行显示插件名、来源 `Tag`、完整安装 spec 与动作文案（`安装` / `需手动更新` / `启用` / `停用` / `已是当前版本`），便于防钓鱼核对。
 
 客户端请求必须带超时（`AbortController`），并且 `request()` 永远以结果对象 resolve 而不抛出，因此一次挂起的网络调用不会永久锁死标签页的所有按钮。
 
@@ -244,7 +254,7 @@ CRC32 不是安全边界。分享码会公开插件名称和来源，所以导�
 - 未知字段、secret-like 输入和所有不安全来源拒绝；
 - wire 值二次校验；
 - 采集固定核心、本地/远端依赖、optional builtin、版本锁定；
-- 同版本跳过、旧版本升级、enabled 同步、构建脚本批准、取消和失败回滚；
+- 同版本跳过、旧版本/不同来源需手动更新的整批预检查、GitHub ref 与歧义来源匹配、enabled 同步、构建脚本批准、取消和失败回滚；
 - 二维码：与独立参考实现逐模块比对的黄金矩阵、定位/时序图形与暗模块、版本容量边界（L 2953 / M 2331 / H 1273 字节上限）、非法入参与超长入参、SVG 的静区与路径命令数；
 - 扫码识别：多个版本 × 多种模块尺寸/静区/边距的往返、带干扰元素的「截图」、噪声/空白/过小/尺寸不符的拒绝，以及「认得出但不是组合码」要单独报出原文；
 - 界面文案：加载真实客户端模块取回字典，断言两份字典 key 完全一致，且代码里用到的每个 `t('key')` 都已注册；

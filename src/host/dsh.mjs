@@ -66,22 +66,9 @@ async function listBundles(pluginManager) {
   throw new Error('plugin-manager-invalid-bundles')
 }
 
-function dependencyMap(bundles) {
-  const dependencies = {}
-  for (const bundle of bundles) {
-    const name = bundle?.name ?? bundle?.id ?? bundle?.packageName
-    if (typeof name !== 'string' || !name) continue
-    const spec = bundle.spec ?? bundle.source ?? bundle.dependency
-    if (typeof spec === 'string' && spec) dependencies[name] = spec
-    else if (typeof bundle.version === 'string' && bundle.version) dependencies[name] = bundle.version
-  }
-  return dependencies
-}
-
 function collectForBundles(bundles, options = {}) {
   return collectEntries({
     bundles,
-    dependencies: dependencyMap(bundles),
     includeOptional: options.includeOptional !== false,
     pin: options.pin !== false,
   })

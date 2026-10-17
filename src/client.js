@@ -61,7 +61,10 @@ window.__ModuleLoader__.load({
       failure: '操作失败',
       exportFailed: '当前 profile 没有可导出的可移植插件。',
       rowInstall: '安装',
-      rowUpgrade: '升级',
+      rowManualUpdate: '需手动更新',
+      manualUpdateReason: '该插件已安装，需先更新版本或来源。Web profile 请退出 DSH 后用 CLI 更新到上方规格；桌面 profile 请在应用内处理。完成后重新解析组合码。',
+      ambiguousSourceReason: '多个已安装插件对应这个来源，无法确定目标。请先在插件管理中核对，再重新解析。',
+      manualRequired: '部分条目需先手动处理；可单独安装其他插件，处理完成后重新解析。',
       rowEnable: '启用',
       rowDisable: '停用',
       rowCurrent: '已是当前版本',
@@ -118,7 +121,10 @@ window.__ModuleLoader__.load({
       failure: 'Operation failed',
       exportFailed: 'No portable plugins are available in this profile.',
       rowInstall: 'Install',
-      rowUpgrade: 'Upgrade',
+      rowManualUpdate: 'Manual update needed',
+      manualUpdateReason: 'This plugin is installed and needs a version or source change. For a Web profile, stop DSH and use the CLI to apply the spec above; manage desktop profiles in the app. Then parse the code again.',
+      ambiguousSourceReason: 'Several installed plugins match this source. Check them in plugin management, then parse the code again.',
+      manualRequired: 'Some entries need manual attention. You can install other plugins individually, then parse again after resolving these entries.',
       rowEnable: 'Enable',
       rowDisable: 'Disable',
       rowCurrent: 'Already current',
@@ -171,11 +177,17 @@ window.__ModuleLoader__.load({
 
     /** The per-row button label and whether that row is actionable. */
     function rowButton(row, t) {
+      if (row.action === 'upgrade') return { label: t('rowManualUpdate'), disabled: true, refused: true }
       if (row.verdict && row.verdict.ok === false) return { label: t('refused'), disabled: true, refused: true }
       if (row.action === 'skip') return { label: t('rowCurrent'), disabled: true }
-      if (row.action === 'upgrade') return { label: t('rowUpgrade'), disabled: false }
       if (row.action === 'set-enabled') return { label: row.entry.enabled ? t('rowEnable') : t('rowDisable'), disabled: false }
       return { label: t('rowInstall'), disabled: false }
+    }
+
+    function reasonText(reason, t) {
+      if (reason === 'manual-update-required') return t('manualUpdateReason')
+      if (reason === 'installed-source-ambiguous') return t('ambiguousSourceReason')
+      return reason
     }
 
     const QR_QUIET_ZONE = 4
@@ -329,6 +341,7 @@ window.__ModuleLoader__.load({
         const entry = row.entry ?? {}
         const index = rowIndexOf(row, position)
         const button = rowButton(row, t)
+        const reason = reasonText(row.action === 'upgrade' ? 'manual-update-required' : row.verdict?.reason, t)
         const working = busyRow !== null && busyRow === index
         return h('li', { key: `${index}-${publicLabel(entry)}`, className: 'dps-card' },
           h('div', { className: 'dps-cardHead' },
@@ -339,12 +352,12 @@ window.__ModuleLoader__.load({
               variant: 'outline',
               size: 'sm',
               disabled: busy || button.disabled || !canSelect,
-              title: button.refused ? (row.verdict?.reason ?? t('refused')) : (canSelect ? button.label : t('hostOld')),
+              title: button.refused ? (reason ?? t('refused')) : (canSelect ? button.label : t('hostOld')),
               onClick: () => onApply(row, position),
             }, working ? t('rowWorking') : button.label)),
-          h('code', { className: 'dps-spec' }, row.spec),
+          h('code', { className: 'dps-spec' }, row.action === 'upgrade' ? (row.manualSpec ?? row.spec) : row.spec),
           button.refused
-            ? h('p', { className: 'dps-reason' }, `${t('refused')}: ${row.verdict.reason}`)
+            ? h('p', { className: 'dps-reason' }, reason ?? t('refused'))
             : null)
       }))
     }
@@ -428,7 +441,7 @@ window.__ModuleLoader__.load({
           }
           setStatus({
             kind: 'error',
-            text: `${t('failure')}: ${failureReason(result)}`,
+            text: `${t('failure')}: ${reasonText(failureReason(result), t)}`,
           })
         } finally {
           setBusy(false)
@@ -667,7 +680,8 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const pendingRows = preview ? preview.filter((row) => row.action !== 'skip' && row.verdict?.ok !== false).length : 0
+      const blockedRows = preview ? preview.filter((row) => row.action === 'upgrade' || row.verdict?.ok === false).length : 0
+      const pendingRows = preview ? preview.filter((row) => row.action !== 'skip' && row.action !== 'upgrade' && row.verdict?.ok !== false).length : 0
       const hint = busy
         ? t('working')
         : !trimmed
@@ -676,9 +690,11 @@ window.__ModuleLoader__.load({
             ? t('stale')
             : !parsed
               ? t('needParse')
-              : !selection
-                ? t('hostOld')
-                : `${t('total')} ${preview.length} · ${pendingRows} ${t('willRun')} · ${t('hintSingle')}`
+              : blockedRows > 0
+                ? t('manualRequired')
+                : !selection
+                  ? t('hostOld')
+                  : `${t('total')} ${preview.length} · ${pendingRows} ${t('willRun')} · ${t('hintSingle')}`
 
       return h('section', { ref: rootRef, className: dragging ? 'dps-root dps-dropping' : 'dps-root' },
         h('p', { className: 'dps-intro' }, t('intro')),
@@ -730,7 +746,7 @@ window.__ModuleLoader__.load({
           h(Button, {
             variant: parsed && pendingRows > 0 ? 'primary' : 'outline',
             size: 'md',
-            disabled: busy || !parsed || pendingRows === 0,
+            disabled: busy || !parsed || pendingRows === 0 || blockedRows > 0,
             onClick: () => apply(null),
           }, t('installAll')),
           busy ? h(Button, { variant: 'ghost', size: 'md', disabled: !requestId, onClick: cancel }, t('cancel')) : null),

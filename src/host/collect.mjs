@@ -1,4 +1,5 @@
 import { normalizeEntry } from '../shared/entries.mjs'
+import { bundleName, bundleVersion, bundleEnabled, bundleSource, dependencyRange, isRegistryRange } from './bundles.mjs'
 
 const LOCAL_OR_REMOTE_RE = /^(?:link:|file:|portal:|workspace:|https?:\/\/|git(?:\+(?:https?|ssh))?:\/\/|git@|ssh:\/\/|(?:\.\.?)[\\/]|[A-Za-z]:[\\/])/iu
 
@@ -7,33 +8,16 @@ function dependencyFor(name, dependencies) {
   return Object.prototype.hasOwnProperty.call(dependencies, name) ? dependencies[name] : null
 }
 
-/**
- * `listBundles()` reports an npm bundle's source as `name@range`; a profile
- * manifest stores only the range. Strip the name so the value classifies like
- * a package.json dependency instead of failing as an unsupported spec.
- */
-function dependencyRange(name, raw) {
-  if (typeof raw !== 'string' || !raw) return raw
-  const prefix = `${name}@`
-  return raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
-}
-
 function portableDependency(bundle, dependencies) {
   const name = bundleName(bundle)
-  const declared = dependencyFor(name, dependencies)
-  if (typeof declared === 'string' && declared) return dependencyRange(name, declared)
-  const spec = bundle?.spec ?? bundle?.source ?? bundle?.dependency
-  if (typeof spec === 'string' && spec) return dependencyRange(name, spec)
+  const declared = dependencyRange(name, dependencyFor(name, dependencies))
+  if (declared !== null) return declared
+  const spec = bundleSource(bundle)
+  if (spec !== null) return spec
   // listBundles() intentionally returns a compact public record and does not
   // repeat package.json dependencies. An npm name plus its resolved version is
   // still a deterministic portable install spec in that case.
-  const version = bundle?.version ?? bundle?.resolvedVersion
-  if (typeof name === 'string' && typeof version === 'string' && version) return `${name}@${version}`
-  return null
-}
-
-function bundleName(bundle) {
-  return bundle?.name ?? bundle?.id ?? bundle?.packageName ?? null
+  return bundleVersion(bundle)
 }
 
 /**
@@ -50,7 +34,7 @@ export function collectEntries({ bundles, dependencies = {}, includeOptional = t
       skipped.push({ name: null, reason: 'bundle-name-missing' })
       continue
     }
-    const enabled = bundle.enabled !== false && bundle.active !== false
+    const enabled = bundleEnabled(bundle) ?? true
     if (bundle.optional === true && bundle.installed !== true) {
       // Only an enabled optional builtin carries state worth sharing: the
       // default is off, so exporting every available experimental bundle would
@@ -72,10 +56,17 @@ export function collectEntries({ bundles, dependencies = {}, includeOptional = t
       continue
     }
     try {
+      const version = bundleVersion(bundle)
+      // Spaced manifest ranges are portable when a resolved version can be
+      // pinned (or pinning is off). Never put whitespace into the wire format.
+      if (pin && !version && isRegistryRange(spec) && spec.includes(' ')) {
+        skipped.push({ name, spec, reason: 'dependency-version-unresolved' })
+        continue
+      }
       const input = spec.startsWith('github:')
-        ? { spec, version: pin ? (bundle.version ?? null) : null, enabled }
-        : isVersionLike(spec)
-          ? { name, version: pin ? (bundle.version ?? spec) : null, enabled }
+        ? { spec, version: pin ? version : null, enabled }
+        : isRegistryRange(spec)
+          ? { name, version: pin ? (version ?? spec) : null, enabled }
           : null
       if (!input) {
         skipped.push({ name, reason: 'dependency-spec-unsupported', spec })
@@ -87,8 +78,4 @@ export function collectEntries({ bundles, dependencies = {}, includeOptional = t
     }
   }
   return { entries, skipped }
-}
-
-function isVersionLike(value) {
-  return /^[0-9A-Za-z.*+<>=^~|_-]+$/u.test(value) && !value.includes('/')
 }

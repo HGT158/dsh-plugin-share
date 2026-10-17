@@ -1,24 +1,34 @@
 import { installSpec, normalizeEntries, classifySpec } from '../shared/entries.mjs'
+import { bundleName, bundleVersion, bundleEnabled, bundleSource, isRegistryRange } from './bundles.mjs'
 
-function nameOf(entry) {
-  return entry.value
+function githubSource(spec) {
+  const source = classifySpec(spec)
+  if (!source.ok || source.kind !== 'github') return null
+  return { repository: `${source.owner}/${source.repo}`.toLowerCase(), ref: source.ref }
 }
 
-function installedName(bundle) {
-  return bundle?.name ?? bundle?.id ?? bundle?.packageName ?? null
+function findCurrent(entry, installed) {
+  if (entry.kind !== 'github') {
+    const matches = installed.filter((bundle) => bundleName(bundle) === entry.value
+      && (entry.kind === 'builtin' || bundle.installed !== false))
+    return { current: matches.length === 1 ? matches[0] : undefined, ambiguous: matches.length > 1 }
+  }
+  const wanted = githubSource(entry.value)
+  const matches = installed.filter((bundle) => bundle?.installed !== false
+    && githubSource(bundleSource(bundle))?.repository === wanted.repository)
+  const exact = matches.filter((bundle) => githubSource(bundleSource(bundle)).ref === wanted.ref)
+  const candidates = exact.length > 0 ? exact : matches
+  return { current: candidates.length === 1 ? candidates[0] : undefined, ambiguous: candidates.length > 1 }
 }
 
-function installedVersion(bundle) {
-  return bundle?.version ?? bundle?.resolvedVersion ?? null
-}
-
-function installedEnabled(bundle) {
-  return bundle?.enabled ?? bundle?.active
-}
-
-/** The install spec an installed bundle reports; listBundles calls it `source`. */
-function installedSpec(bundle) {
-  return bundle?.spec ?? bundle?.source ?? bundle?.dependency ?? null
+function sameSource(entry, current) {
+  const source = bundleSource(current)
+  if (entry.kind === 'github') {
+    const wanted = githubSource(entry.value)
+    const existing = githubSource(source)
+    return existing?.repository === wanted.repository && existing.ref === wanted.ref
+  }
+  return source === null || isRegistryRange(source)
 }
 
 /** Build a preview without touching the filesystem or package manager. */
@@ -27,19 +37,26 @@ export function previewEntries(entries, { installed = [] } = {}) {
   const normalized = normalizeEntries(entries)
   return normalized.map((entry, index) => {
     const spec = installSpec(entry)
-    const verdict = entry.kind === 'github' ? classifySpec(entry.value) : { ok: true, kind: entry.kind === 'builtin' ? 'builtin' : 'npm' }
-    const current = installed.find((bundle) => installedName(bundle) === nameOf(entry) || installedSpec(bundle) === spec)
+    let verdict = entry.kind === 'github' ? classifySpec(entry.value) : { ok: true, kind: entry.kind === 'builtin' ? 'builtin' : 'npm' }
+    const { current, ambiguous } = findCurrent(entry, installed)
     let action = entry.kind === 'builtin' ? 'set-enabled' : 'install'
     if (current) {
       if (entry.kind === 'builtin') {
-        action = installedEnabled(current) === entry.enabled ? 'skip' : 'set-enabled'
-      } else if (entry.version && installedVersion(current) === entry.version) {
-        action = installedEnabled(current) === undefined || installedEnabled(current) === entry.enabled ? 'skip' : 'set-enabled'
+        action = bundleEnabled(current) === entry.enabled ? 'skip' : 'set-enabled'
+      } else if (sameSource(entry, current) && entry.version && bundleVersion(current) === entry.version) {
+        action = bundleEnabled(current) === undefined || bundleEnabled(current) === entry.enabled ? 'skip' : 'set-enabled'
       } else if (entry.kind !== 'builtin') {
         action = 'upgrade'
       }
     }
-    return { index, entry, spec, verdict, current, action }
+    // DSH's live installBundle API rejects already-installed packages and has
+    // no non-destructive update operation. Refuse before changing any rows.
+    if (action === 'upgrade') verdict = { ...verdict, ok: false, reason: 'manual-update-required' }
+    if (ambiguous) verdict = { ...verdict, ok: false, reason: 'installed-source-ambiguous' }
+    // pnpm needs the dependency name on GitHub replacements; a bare GitHub
+    // shortcut can otherwise be interpreted as a new dependency name.
+    const manualSpec = action === 'upgrade' && entry.kind === 'github' ? `${bundleName(current)}@${spec}` : spec
+    return { index, entry, spec, verdict, current, action, ...(action === 'upgrade' ? { manualSpec } : {}) }
   })
 }
 
@@ -61,6 +78,10 @@ export function selectPreview(preview, only) {
  */
 export async function applyPreview(preview, manager, { requestId = undefined, approvedBuilds = undefined, signal } = {}) {
   if (!manager || typeof manager !== 'object') throw new TypeError('plugin manager is required')
+  const blocked = preview.find((row) => row.action === 'upgrade' || row.verdict?.reason === 'installed-source-ambiguous')
+  if (blocked) {
+    return { ok: false, error: blocked.verdict?.reason ?? 'manual-update-required', report: [], rollback: [] }
+  }
   const completed = []
   const report = []
   try {
@@ -77,13 +98,14 @@ export async function applyPreview(preview, manager, { requestId = undefined, ap
       let result
       if (row.action === 'set-enabled') {
         if (typeof manager.setBundleEnabled !== 'function') throw new Error('setBundleEnabled-unavailable')
-        result = await manager.setBundleEnabled(row.entry.value, row.entry.enabled)
+        const target = bundleName(row.current) ?? row.entry.value
+        result = await manager.setBundleEnabled(target, row.entry.enabled)
         if (result?.application === 'failed') {
           throw Object.assign(new Error(result.error?.code ?? 'bundle-enable-failed'), { code: result.error?.code ?? 'bundle-enable-failed', result })
         }
-        const previousEnabled = installedEnabled(row.current)
+        const previousEnabled = bundleEnabled(row.current)
         if (typeof previousEnabled === 'boolean' && previousEnabled !== row.entry.enabled) {
-          completed.push({ type: 'builtin', row, previousEnabled })
+          completed.push({ type: 'enabled', row, target, previousEnabled })
         }
       } else {
         if (typeof manager.installBundle !== 'function') throw new Error('installBundle-unavailable')
@@ -101,8 +123,7 @@ export async function applyPreview(preview, manager, { requestId = undefined, ap
             : result.error?.code ?? result.packageResult?.kind ?? 'bundle-install-failed'
           throw Object.assign(new Error(code), { code, result })
         }
-        // A new install can be removed safely. An upgrade replaces an existing
-        // bundle and is left in place because removeBundle would be destructive.
+        // Only packages newly installed by this transaction may be removed.
         if (row.action === 'install') completed.push({ type: 'install', row, target: result?.bundle ?? row.entry.value })
       }
       report.push({ row, status: row.action === 'set-enabled' ? 'enabled' : 'installed', result })
@@ -120,11 +141,12 @@ export async function applyPreview(preview, manager, { requestId = undefined, ap
             await manager.removeBundle(target)
             rollback.push({ spec: target, ok: true })
           } else if (typeof manager.setBundleEnabled === 'function') {
-            await manager.setBundleEnabled(item.row.entry.value, item.previousEnabled)
-            rollback.push({ spec: item.row.entry.value, enabled: item.previousEnabled, ok: true })
+            const restored = await manager.setBundleEnabled(item.target, item.previousEnabled)
+            if (restored?.application === 'failed') throw new Error(restored.error?.code ?? 'bundle-enable-failed')
+            rollback.push({ spec: item.target, enabled: item.previousEnabled, ok: true })
           }
         } catch (rollbackError) {
-          const spec = item.type === 'install' ? (item.target ?? item.row.entry.value) : item.row.entry.value
+          const spec = item.target ?? item.row.entry.value
           rollback.push({ spec, ok: false, reason: rollbackError.message })
         }
       }

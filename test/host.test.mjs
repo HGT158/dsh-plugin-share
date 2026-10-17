@@ -3,6 +3,7 @@ import test from 'node:test'
 import { collectEntries } from '../src/host/collect.mjs'
 import { applyPreview, previewEntries, selectPreview } from '../src/host/import.mjs'
 import { apply, inject } from '../src/host/dsh.mjs'
+import { encodeCode, decodeCode } from '../src/host/codec.mjs'
 
 test('collector exports portable removable bundles and optional builtins', () => {
   const result = collectEntries({
@@ -83,6 +84,39 @@ test('collector exports only enabled optional builtins', () => {
   assert.deepEqual(result.entries, [{ kind: 'builtin', value: 'opt-in', version: null, enabled: true }])
 })
 
+test('collector pins spaced npm ranges without weakening the wire format', () => {
+  const bundle = { name: '@scope/pkg', source: '@scope/pkg@>=1 <2 || >=3 <4', version: '3.2.1', installed: true, removable: true }
+  assert.deepEqual(collectEntries({ bundles: [bundle] }).entries, [
+    { kind: 'npm', value: '@scope/pkg', version: '3.2.1', enabled: true },
+  ])
+  assert.equal(collectEntries({ bundles: [bundle], pin: false }).entries[0].version, null)
+  const unresolved = collectEntries({ bundles: [{ ...bundle, version: undefined }] })
+  assert.deepEqual(unresolved.entries, [])
+  assert.equal(unresolved.skipped[0].reason, 'dependency-version-unresolved')
+  for (const source of ['@scope/pkg@npm:other@1', '@scope/pkg@file:../local', '@scope/pkg@https://example.test/pkg.tgz', '@scope/pkg@>=1\n<2']) {
+    assert.equal(collectEntries({ bundles: [{ ...bundle, source }] }).entries.length, 0, source)
+  }
+})
+
+test('collector consistently resolves missing and empty bundle fields', () => {
+  const bundles = [
+    { name: 'plain', version: '1.2.3' },
+    { name: 'resolved', resolvedVersion: '2.3.4' },
+    { name: 'range', spec: '', source: 'range@^3', version: '', resolvedVersion: '3.4.5' },
+    { name: '', id: '@scope/fallback', dependency: '@scope/fallback@^4', resolvedVersion: '4.5.6', active: false },
+    { name: 'repo', spec: ' ', source: 'github:owner/repo#main', resolvedVersion: '5.6.7' },
+  ].map((bundle) => ({ installed: true, removable: true, ...bundle }))
+  const result = collectEntries({ bundles, dependencies: { range: '' } })
+  assert.deepEqual(result.skipped, [])
+  assert.deepEqual(result.entries, [
+    { kind: 'npm', value: 'plain', version: '1.2.3', enabled: true },
+    { kind: 'npm', value: 'resolved', version: '2.3.4', enabled: true },
+    { kind: 'npm', value: 'range', version: '3.4.5', enabled: true },
+    { kind: 'npm', value: '@scope/fallback', version: '4.5.6', enabled: false },
+    { kind: 'github', value: 'github:owner/repo#main', version: '5.6.7', enabled: true },
+  ])
+})
+
 test('preview marks same version skip and old version upgrade', () => {
   const preview = previewEntries([
     { name: 'same', version: '1.0.0' },
@@ -93,6 +127,36 @@ test('preview marks same version skip and old version upgrade', () => {
     { name: 'old', version: '1.0.0' },
   ] })
   assert.deepEqual(preview.map((row) => row.action), ['skip', 'upgrade', 'install'])
+  assert.equal(preview[1].verdict.ok, false)
+  assert.equal(preview[1].verdict.reason, 'manual-update-required')
+})
+
+test('preview treats a versionless entry as manual once that plugin is installed', () => {
+  // A null version means "follow the latest release". Once the package is
+  // present the host cannot tell whether the installed copy is current, so the
+  // row becomes a manual update instead of a silent skip. A missing package
+  // still installs normally.
+  const installed = [
+    { name: 'pkg', source: 'pkg@1.0.0', version: '1.0.0', enabled: true },
+    { name: 'repo', source: 'github:owner/repo#main', version: '1.0.0', enabled: true },
+  ]
+  const [npmInstalled] = previewEntries([{ name: 'pkg' }], { installed })
+  assert.equal(npmInstalled.action, 'upgrade')
+  assert.equal(npmInstalled.verdict.ok, false)
+  assert.equal(npmInstalled.verdict.reason, 'manual-update-required')
+  assert.equal(npmInstalled.manualSpec, 'pkg')
+  assert.equal(npmInstalled.current.name, 'pkg')
+
+  const [githubInstalled] = previewEntries([{ spec: 'github:owner/repo#main' }], { installed })
+  assert.equal(githubInstalled.action, 'upgrade')
+  assert.equal(githubInstalled.verdict.ok, false)
+  assert.equal(githubInstalled.verdict.reason, 'manual-update-required')
+  assert.equal(githubInstalled.manualSpec, 'repo@github:owner/repo#main')
+
+  const [npmMissing] = previewEntries([{ name: 'missing-pkg' }])
+  assert.equal(npmMissing.action, 'install')
+  const [githubMissing] = previewEntries([{ spec: 'github:owner/missing#main' }])
+  assert.equal(githubMissing.action, 'install')
 })
 
 test('preview recognizes a GitHub bundle recorded by listBundles source', () => {
@@ -103,6 +167,48 @@ test('preview recognizes a GitHub bundle recorded by listBundles source', () => 
     { installed: [{ name: 'repo', source: 'github:owner/repo#v1', version: '0.3.17', enabled: true }] },
   )
   assert.equal(preview[0].action, 'skip')
+})
+
+test('preview matches GitHub repository identity while keeping refs distinct', () => {
+  const installed = [{ name: 'repo', spec: '', source: 'repo@github:Owner/Repo#main', resolvedVersion: '1.2.3', enabled: true }]
+  const [same, changed] = previewEntries([
+    { spec: 'github:owner/repo#main', version: '1.2.3' },
+    { spec: 'github:owner/repo#v2', version: '1.2.3' },
+  ], { installed })
+  assert.equal(same.action, 'skip')
+  assert.equal(changed.current.name, 'repo')
+  assert.equal(changed.action, 'upgrade')
+  assert.equal(changed.verdict.reason, 'manual-update-required')
+  assert.equal(changed.manualSpec, 'repo@github:owner/repo#v2')
+})
+
+test('preview refuses ambiguous GitHub matches and prefers a unique exact ref', () => {
+  const installed = [
+    { name: 'first', source: 'github:owner/repo#v1', version: '1.0.0' },
+    { name: 'second', source: 'github:owner/repo#v2', version: '2.0.0' },
+  ]
+  const [exact, ambiguous] = previewEntries([
+    { spec: 'github:owner/repo#v2', version: '2.0.0' },
+    { spec: 'github:owner/repo#v3', version: '3.0.0' },
+  ], { installed })
+  assert.equal(exact.current.name, 'second')
+  assert.equal(exact.action, 'skip')
+  assert.equal(ambiguous.current, undefined)
+  assert.equal(ambiguous.verdict.reason, 'installed-source-ambiguous')
+})
+
+test('preview requires manual replacement when a same-name package has another source', () => {
+  for (const source of ['github:owner/pkg#v1', 'file:../pkg', 'pkg@npm:other@1']) {
+    const [row] = previewEntries([{ name: 'pkg', version: '1.0.0' }], {
+      installed: [{ name: 'pkg', source, version: '1.0.0', enabled: true }],
+    })
+    assert.equal(row.action, 'upgrade', source)
+    assert.equal(row.verdict.reason, 'manual-update-required', source)
+  }
+  const [missing] = previewEntries([{ name: 'pkg', version: '1.0.0' }], {
+    installed: [{ name: 'pkg', version: '1.0.0', installed: false }],
+  })
+  assert.equal(missing.action, 'install')
 })
 
 test('preview applies an enabled-state change without reinstalling', () => {
@@ -161,7 +267,7 @@ test('applyPreview stops on build approval and rolls back new installs', async (
   assert.deepEqual(calls, [['install', 'first@1.0.0'], ['install', 'needs-build@1.0.0'], ['remove', 'first']])
 })
 
-test('applyPreview restores builtin state and does not remove upgrades on failure', async () => {
+test('applyPreview restores builtin state on failure', async () => {
   const calls = []
   const manager = {
     async setBundleEnabled(name, enabled) {
@@ -176,21 +282,91 @@ test('applyPreview restores builtin state and does not remove upgrades on failur
   }
   const preview = previewEntries([
     { name: 'official', kind: 'builtin', enabled: false },
-    { name: 'old', version: '2.0.0' },
     { name: 'broken', version: '1.0.0' },
   ], { installed: [
     { name: 'official', enabled: true },
-    { name: 'old', version: '1.0.0' },
   ] })
   const result = await applyPreview(preview, manager)
   assert.equal(result.ok, false)
   assert.equal(result.error, 'registry-down')
   assert.deepEqual(calls, [
     ['enabled', 'official', false],
-    ['install', 'old@2.0.0'],
     ['install', 'broken@1.0.0'],
     ['enabled', 'official', true],
   ])
+})
+
+test('applyPreview uses the installed GitHub package name for enablement and rollback', async () => {
+  const calls = []
+  const preview = previewEntries([
+    { spec: 'github:owner/repo#main', version: '1.2.3', enabled: false },
+    { name: 'broken', version: '1.0.0' },
+  ], { installed: [{ name: 'actual-package-name', source: 'github:owner/repo#main', version: '1.2.3', enabled: true }] })
+  const result = await applyPreview(preview, {
+    async setBundleEnabled(name, enabled) {
+      assert.equal(name, 'actual-package-name')
+      calls.push([name, enabled])
+      return { application: 'applied' }
+    },
+    async installBundle() { throw new Error('registry-down') },
+  })
+  assert.equal(result.error, 'registry-down')
+  assert.deepEqual(calls, [['actual-package-name', false], ['actual-package-name', true]])
+  assert.deepEqual(result.rollback, [{ spec: 'actual-package-name', enabled: true, ok: true }])
+})
+
+test('applyPreview blocks updates before any selected row changes and still allows other single rows', async () => {
+  const calls = []
+  const manager = {
+    async installBundle(spec) { calls.push(spec); return { application: 'applied' } },
+    async removeBundle(name) { calls.push(`remove:${name}`) },
+  }
+  const preview = previewEntries([
+    { name: 'new-plugin', version: '1.0.0' },
+    { name: 'old', version: '2.0.0' },
+  ], { installed: [{ name: 'old', source: 'old@1.0.0', version: '1.0.0' }] })
+  // Even a preview built by an older caller must never route an upgrade to
+  // installBundle (the real live manager would reject it as already-installed).
+  preview[1].verdict = { ok: true, kind: 'npm' }
+  const blocked = await applyPreview(preview, manager)
+  assert.equal(blocked.error, 'manual-update-required')
+  assert.deepEqual(blocked.report, [])
+  assert.deepEqual(calls, [])
+  assert.equal((await applyPreview(selectPreview(preview, [0]), manager)).ok, true)
+  assert.deepEqual(calls, ['new-plugin@1.0.0'])
+})
+
+test('applyPreview blocks a versionless entry that matches an installed plugin', async () => {
+  const calls = []
+  const preview = previewEntries([
+    { name: 'pkg' },
+    { spec: 'github:owner/repo#main' },
+  ], { installed: [
+    { name: 'pkg', source: 'pkg@1.0.0', version: '1.0.0' },
+    { name: 'repo', source: 'github:owner/repo#main', version: '1.0.0' },
+  ] })
+  const result = await applyPreview(preview, {
+    async installBundle(spec) { calls.push(spec); return { application: 'applied' } },
+    async removeBundle() { calls.push('remove') },
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'manual-update-required')
+  assert.deepEqual(result.report, [])
+  assert.deepEqual(result.rollback, [])
+  assert.deepEqual(calls, [])
+})
+
+test('applyPreview reports a failed enablement rollback rather than claiming success', async () => {
+  const preview = previewEntries([
+    { name: 'pkg', version: '1.0.0', enabled: false },
+    { name: 'broken', version: '1.0.0' },
+  ], { installed: [{ name: 'pkg', version: '1.0.0', enabled: true }] })
+  const result = await applyPreview(preview, {
+    async setBundleEnabled(_name, enabled) { return enabled ? { application: 'failed', error: { code: 'restore-failed' } } : { application: 'applied' } },
+    async installBundle() { throw new Error('install-failed') },
+  })
+  assert.equal(result.rollback[0].ok, false)
+  assert.equal(result.rollback[0].reason, 'restore-failed')
 })
 
 test('applyPreview treats manager failure results as failed imports', async () => {
@@ -228,7 +404,7 @@ function fakeResponse() {
 }
 
 /** Register the plugin against a fake context and hand back the route handler. */
-function registerRoute({ rejection }) {
+function registerRoute({ rejection, manager }) {
   let handler = null
   const asked = []
   const ctx = {
@@ -238,7 +414,7 @@ function registerRoute({ rejection }) {
         return rejection
       },
     },
-    pluginManager: {
+    pluginManager: manager ?? {
       listBundles() {
         throw new Error('the plugin manager must not be reached before the trust fence')
       },
@@ -266,6 +442,41 @@ test('routes are registered behind the connection trust fence', async () => {
   assert.equal(response.statusCode, 401)
   assert.equal(response.body, '')
   assert.deepEqual(asked, [{ host: 'evil.example' }])
+})
+
+test('export and parse routes use the same bundle normalization as the collector', async () => {
+  const bundles = [
+    { name: '@scope/pkg', source: '@scope/pkg@>=1 <2', resolvedVersion: '1.2.3', enabled: true },
+    { name: 'repo', spec: '', dependency: 'github:owner/repo#main', resolvedVersion: '2.3.4', active: false },
+    { name: 'fallback', resolvedVersion: '3.4.5', enabled: true },
+  ].map((bundle) => ({ installed: true, removable: true, ...bundle }))
+  const { handler } = registerRoute({ manager: { listBundles: () => bundles } })
+  const exported = fakeResponse()
+  await handler({ method: 'POST', url: '/api/plugin-share/export', headers: {}, async *[Symbol.asyncIterator]() {} }, exported)
+  assert.equal(exported.statusCode, 200)
+  const result = JSON.parse(exported.body)
+  assert.deepEqual(result.skipped, [])
+  assert.deepEqual(decodeCode(result.code).entries.map(({ kind, name, spec, version, enabled }) => ({
+    kind, value: name ?? spec, version, enabled,
+  })), collectEntries({ bundles }).entries)
+  const parsed = fakeResponse()
+  await handler({ method: 'POST', url: '/api/plugin-share/parse', headers: {}, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ code: result.code })) } }, parsed)
+  assert.equal(parsed.statusCode, 200)
+  assert.deepEqual(JSON.parse(parsed.body).preview.map((row) => row.action), ['skip', 'skip', 'skip'])
+})
+
+test('import route preflights manual updates before invoking the manager', async () => {
+  const calls = []
+  const { handler } = registerRoute({ manager: {
+    listBundles: () => [{ name: 'old', source: 'old@1.0.0', version: '1.0.0' }],
+    installBundle: (...args) => { calls.push(args); throw new Error('must-not-install') },
+  } })
+  const code = encodeCode([{ name: 'new-plugin', version: '1.0.0' }, { name: 'old', version: '2.0.0' }])
+  const response = fakeResponse()
+  await handler({ method: 'POST', url: '/api/plugin-share/import', headers: {}, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ code, confirm: true })) } }, response)
+  assert.equal(response.statusCode, 409)
+  assert.equal(JSON.parse(response.body).error, 'manual-update-required')
+  assert.deepEqual(calls, [])
 })
 
 test('an admitted caller reaches the share routes', async () => {

@@ -10,16 +10,29 @@ Turn "which plugins I have installed" into a pasteable **offline share code** �
 
 [![stars](https://img.shields.io/github/stars/HGT158/dsh-plugin-share?style=flat)](https://github.com/HGT158/dsh-plugin-share)
 [![release](https://img.shields.io/github/v/tag/HGT158/dsh-plugin-share?style=flat)](https://github.com/HGT158/dsh-plugin-share/tags)
+[![npm](https://img.shields.io/npm/v/dsh-plugin-share?style=flat)](https://www.npmjs.com/package/dsh-plugin-share)
 [![DSH bundle](https://img.shields.io/badge/DSH-bundle-4f46e5)](https://deepseek-harness.github.io/deepseek-harness/develop/basic/publish)
 
 ![Plugin share tab](https://raw.githubusercontent.com/HGT158/dsh-plugin-share/main/docs/plugin-share-tab-en.png)
 
 ## Install
 
+Install from npm (recommended):
+
 ```powershell
-dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#main'
+dsh plugin --profile web add dsh-plugin-share
 dsh --profile web
 ```
+
+To pin a version (reproducible installs), spell it out: `dsh plugin --profile web add dsh-plugin-share@0.2.2`.
+
+You can also install straight from the GitHub repository (tracks `main`):
+
+```powershell
+dsh plugin --profile web add 'dsh-plugin-share@github:HGT158/dsh-plugin-share#main'
+```
+
+> Use the **named** `name@github:…` form. A bare `github:owner/repo#main` can land `#main` in the dependency name on some setups, and pnpm then refuses the whole profile with `ERR_PNPM_INVALID_DEPENDENCY_NAME`; if that happens, remove the `"dsh-plugin-share#main"` entry from the profile's `package.json` and install again.
 
 Open Harness Web → **Settings → Built-in plugins → Plugin share**.
 
@@ -27,7 +40,7 @@ The package is plain JS with zero dependencies and no build step, so the install
 
 The plugin also declares an official package as a `peerDependencies` entry (`@deepseek-ai/dsh-client-ui-settings-plugins`, covering the dsh 0.2 line), so a host outside that range is **refused at install or boot** with the reason and the remedy instead of failing quietly later.
 
-Verified on `dsh 0.2.0-rc.2` with the Web profile (`@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app`). The desktop profile is managed by the desktop app itself and cannot be installed into from the CLI.
+Verified on `dsh 0.2.1-rc.2` (and `0.2.0-rc.2`) with the Web profile (`@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app`). The desktop profile is managed by the desktop app itself and cannot be installed into from the CLI.
 
 ## How to use it
 
@@ -71,17 +84,17 @@ Paste the code and click **Parse code**. Every plugin is listed with its name, s
 
 ## Updating
 
-The lockfile pins `#main` to a specific commit, so updating is explicit:
-
 ```powershell
 dsh plugin --profile web update dsh-plugin-share
 dsh --profile web
 ```
 
-To pin a version instead (reproducible installs), use the tag:
+GitHub installs behave the same: the lockfile pins `#main` to a specific commit, and `update` moves it to the latest one.
+
+To pin a version (reproducible installs), spell it out:
 
 ```powershell
-dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#v0.2.0'
+dsh plugin --profile web add dsh-plugin-share@0.2.2
 ```
 
 ## Security

@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-share",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Offline DSH plugin set sharing with a compact D1/NP1 code",
   "license": "MIT",
   "type": "module",

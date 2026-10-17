@@ -10,16 +10,29 @@
 
 [![stars](https://img.shields.io/github/stars/HGT158/dsh-plugin-share?style=flat)](https://github.com/HGT158/dsh-plugin-share)
 [![release](https://img.shields.io/github/v/tag/HGT158/dsh-plugin-share?style=flat)](https://github.com/HGT158/dsh-plugin-share/tags)
+[![npm](https://img.shields.io/npm/v/dsh-plugin-share?style=flat)](https://www.npmjs.com/package/dsh-plugin-share)
 [![DSH bundle](https://img.shields.io/badge/DSH-bundle-4f46e5)](https://deepseek-harness.github.io/deepseek-harness/develop/basic/publish)
 
 ![插件分享标签页](https://raw.githubusercontent.com/HGT158/dsh-plugin-share/main/docs/plugin-share-tab.png)
 
 ## 安装
 
+从 npm 安装（推荐）：
+
 ```powershell
-dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#main'
+dsh plugin --profile web add dsh-plugin-share
 dsh --profile web
 ```
+
+想固定版本（可复现）就写全：`dsh plugin --profile web add dsh-plugin-share@0.2.2`。
+
+也可以直接装 GitHub 仓库（跟着 `main` 走）：
+
+```powershell
+dsh plugin --profile web add 'dsh-plugin-share@github:HGT158/dsh-plugin-share#main'
+```
+
+> 用「包名@github:…」这种**带名字**的写法。裸写 `github:owner/repo#main` 在个别环境里会把 `#main` 拼进依赖名，pnpm 会报 `ERR_PNPM_INVALID_DEPENDENCY_NAME`，整个 profile 都装不了；真遇到了，把 profile 的 `package.json` 里 `"dsh-plugin-share#main"` 这条删掉再重装即可。
 
 打开 Harness Web → **设置 → 内置插件 → 插件分享**。
 
@@ -27,7 +40,7 @@ dsh --profile web
 
 插件还把官方包声明为 `peerDependencies`（`@deepseek-ai/dsh-client-ui-settings-plugins`，范围覆盖 dsh 0.2.x）：宿主版本不在范围内时，dsh 会在安装或启动时**明确拦下**并给出处理方式，而不是装完才发现不对。
 
-已验证环境：`dsh 0.2.0-rc.2` + Web profile（`@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app`）。桌面 profile 由桌面 App 自行管理，CLI 装不进去。
+已验证环境：`dsh 0.2.1-rc.2`（及 `0.2.0-rc.2`）的 Web profile（`@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app`）。桌面 profile 由桌面 App 自行管理，CLI 装不进去。
 
 ## 怎么用
 
@@ -71,17 +84,17 @@ dsh --profile web
 
 ## 更新到最新版
 
-锁文件会把 `#main` 钉在某个具体提交上，所以升级要显式执行：
-
 ```powershell
 dsh plugin --profile web update dsh-plugin-share
 dsh --profile web
 ```
 
-想固定版本（可复现），改用 tag：
+GitHub 来源同理：锁文件会把 `#main` 钉在某个具体提交上，`update` 才会把它移到最新。
+
+想固定版本（可复现），写全版本号：
 
 ```powershell
-dsh plugin --profile web add 'github:HGT158/dsh-plugin-share#v0.2.0'
+dsh plugin --profile web add dsh-plugin-share@0.2.2
 ```
 
 ## 安全

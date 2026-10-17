@@ -24,7 +24,7 @@ dsh plugin --profile web add dsh-plugin-share
 dsh --profile web
 ```
 
-To pin a version (reproducible installs), spell it out: `dsh plugin --profile web add dsh-plugin-share@0.2.2`.
+To pin a version (reproducible installs), spell it out: `dsh plugin --profile web add dsh-plugin-share@0.2.3`.
 
 You can also install straight from the GitHub repository (tracks `main`):
 
@@ -94,7 +94,7 @@ GitHub installs behave the same: the lockfile pins `#main` to a specific commit,
 To pin a version (reproducible installs), spell it out:
 
 ```powershell
-dsh plugin --profile web add dsh-plugin-share@0.2.2
+dsh plugin --profile web add dsh-plugin-share@0.2.3
 ```
 
 ## Security
@@ -135,7 +135,7 @@ It targets **upright, clean QR images**: files this plugin saved, a screenshot s
 ## Development
 
 ```powershell
-npm test                        # codec + collector + import transaction + QR + scanner + route fence + manifest guards, 40 tests
+npm test                        # codec + collector + import transaction + QR + scanner + route fence + manifest guards, 43 tests
 pnpm pack --dry-run             # inspect what would be published
 npm run encode:example          # build a code from examples/plugins.json
 node src/cli.mjs decode D1...   # decode from the command line

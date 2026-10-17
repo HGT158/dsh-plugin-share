@@ -57,6 +57,7 @@ window.__ModuleLoader__.load({
       success: '导入完成',
       successSkipped: '没有需要变更的条目，所有插件都已是当前状态。',
       exported: '已生成组合码，长度',
+      exportedSkipped: '个插件未导出（本地路径或来源不支持）',
       failure: '操作失败',
       exportFailed: '当前 profile 没有可导出的可移植插件。',
       rowInstall: '安装',
@@ -113,6 +114,7 @@ window.__ModuleLoader__.load({
       success: 'Import complete',
       successSkipped: 'Nothing to change; every plugin is already current.',
       exported: 'Share code generated, length',
+      exportedSkipped: 'plugin(s) not exported (local paths or unsupported sources)',
       failure: 'Operation failed',
       exportFailed: 'No portable plugins are available in this profile.',
       rowInstall: 'Install',
@@ -444,7 +446,11 @@ window.__ModuleLoader__.load({
             // A fresh export replaces the code, so any parsed list no longer
             // describes what is in the box.
             clear()
-            setStatus({ kind: 'ok', text: `${t('exported')} · ${result.code.length}` })
+            const skipped = Array.isArray(result.skipped) ? result.skipped.length : 0
+            setStatus({
+              kind: 'ok',
+              text: `${t('exported')} · ${result.code.length}${skipped > 0 ? ` · ${skipped} ${t('exportedSkipped')}` : ''}`,
+            })
           } else {
             const reason = result.error === 'entries-invalid' ? t('exportFailed') : result.error
             setStatus({ kind: 'error', text: `${t('failure')}: ${reason}` })

@@ -24,7 +24,7 @@ dsh plugin --profile web add dsh-plugin-share
 dsh --profile web
 ```
 
-想固定版本（可复现）就写全：`dsh plugin --profile web add dsh-plugin-share@0.2.2`。
+想固定版本（可复现）就写全：`dsh plugin --profile web add dsh-plugin-share@0.2.3`。
 
 也可以直接装 GitHub 仓库（跟着 `main` 走）：
 
@@ -94,7 +94,7 @@ GitHub 来源同理：锁文件会把 `#main` 钉在某个具体提交上，`upd
 想固定版本（可复现），写全版本号：
 
 ```powershell
-dsh plugin --profile web add dsh-plugin-share@0.2.2
+dsh plugin --profile web add dsh-plugin-share@0.2.3
 ```
 
 ## 安全
@@ -135,7 +135,7 @@ Host 半的改动要重启 dsh 生效；客户端 bundle 有版本缓存，浏�
 ## 开发
 
 ```powershell
-npm test                        # 编解码 + 采集 + 导入事务 + 二维码 + 扫码 + 路由鉴权，共 40 项
+npm test                        # 编解码 + 采集 + 导入事务 + 二维码 + 扫码 + 路由鉴权，共 43 项
 pnpm pack --dry-run             # 检查发布内容
 npm run encode:example          # 用 examples/plugins.json 生成一个码
 node src/cli.mjs decode D1...   # 命令行解码

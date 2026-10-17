@@ -101,7 +101,8 @@ Host 的 `collectEntries` 接收 `pluginManager.listBundles()` 的公开记录�
 过滤规则：
 
 - `installed === true && removable === true` 的第三方 bundle 进入候选；
-- `optional === true && installed !== true` 的官方可选 bundle，在 `includeOptional` 开启时作为 builtin 进入；
+- `listBundles()` 对 npm bundle 报告的 `source` 是 `name@range`，采集时先剥掉 `name@` 前缀，把它当成 manifest 里的版本范围处理；
+- `optional === true && installed !== true` 的官方可选 bundle，仅在**已启用**且 `includeOptional` 开启时作为 builtin 进入；默认关闭的不导出（导出它们只会增加无意义的行）；
 - `removable === false` 的固定核心层跳过；
 - 缺失来源、别名、远端 Git、tarball、本地 spec 和不支持的依赖形状进入 `skipped`，不会进入分享码；
 - `pin` 默认开启，用已解析的 bundle 版本锁定 npm 条目；关闭时保留跟随最新版本的语义；
@@ -126,6 +127,8 @@ Host 路由为 `/api/plugin-share`：
 - `POST /qr`：把一段合法组合码编码成二维码矩阵；
 - `POST /scan`：把一张图片里认出的组合码交回来；
 - `POST /cancel`：按 request id 转发取消请求。
+
+预览匹配已安装 bundle 时同时认 `name` 与 `spec`/`source`/`dependency`：`listBundles()` 记录的来源字段叫 `source`，只认 `spec` 会把已安装的 GitHub 插件误判成待安装，进而让「全部安装」对自己的插件报 `already-installed`。
 
 **每个请求都先过信任闸**：`ctx.webServer.register` 只负责挂载路由，本身不校验调用方，所以上面每个 action 在进入之前都必须先调 `ctx.connection.requestRejection(req)`（Host/Origin 校验 + 浏览器登录 token 鉴权），返回 401/403 时直接结束响应，**不读请求体、不碰 pluginManager**。宿主半因此 `inject` 里必须带 `connection`。少了这一步，本机任意进程或跨站页面都能读到插件清单，而 `/import` 是能往 profile 里装包的——这是实测出来的缺口（当时我们的路由无凭据返回 200，而官方插件同类路由一律 401）。
 

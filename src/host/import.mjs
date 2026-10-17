@@ -16,6 +16,11 @@ function installedEnabled(bundle) {
   return bundle?.enabled ?? bundle?.active
 }
 
+/** The install spec an installed bundle reports; listBundles calls it `source`. */
+function installedSpec(bundle) {
+  return bundle?.spec ?? bundle?.source ?? bundle?.dependency ?? null
+}
+
 /** Build a preview without touching the filesystem or package manager. */
 export function previewEntries(entries, { installed = [] } = {}) {
   if (!Array.isArray(installed)) throw new TypeError('installed must be an array')
@@ -23,7 +28,7 @@ export function previewEntries(entries, { installed = [] } = {}) {
   return normalized.map((entry, index) => {
     const spec = installSpec(entry)
     const verdict = entry.kind === 'github' ? classifySpec(entry.value) : { ok: true, kind: entry.kind === 'builtin' ? 'builtin' : 'npm' }
-    const current = installed.find((bundle) => installedName(bundle) === nameOf(entry) || bundle?.spec === spec)
+    const current = installed.find((bundle) => installedName(bundle) === nameOf(entry) || installedSpec(bundle) === spec)
     let action = entry.kind === 'builtin' ? 'set-enabled' : 'install'
     if (current) {
       if (entry.kind === 'builtin') {

@@ -53,6 +53,36 @@ test('collector pins the resolved bundle version over a manifest range', () => {
   assert.deepEqual(result.entries, [{ kind: 'npm', value: 'range-plugin', version: '1.4.2', enabled: true }])
 })
 
+test('collector accepts the name@range source listBundles reports for npm bundles', () => {
+  // The Host synthesizes dependencies from listBundles, whose source field is
+  // `name@range`; that must not be confused with an unsupported install spec.
+  const result = collectEntries({
+    dependencies: {
+      'dsh-pocket': 'dsh-pocket@2.10.6',
+      '@liustack/modlens': '@liustack/modlens@3.26.6',
+    },
+    bundles: [
+      { name: 'dsh-pocket', version: '2.10.6', installed: true, removable: true, enabled: true },
+      { name: '@liustack/modlens', version: '3.26.6', installed: true, removable: true, enabled: true },
+    ],
+  })
+  assert.deepEqual(result.entries, [
+    { kind: 'npm', value: 'dsh-pocket', version: '2.10.6', enabled: true },
+    { kind: 'npm', value: '@liustack/modlens', version: '3.26.6', enabled: true },
+  ])
+  assert.deepEqual(result.skipped, [])
+})
+
+test('collector exports only enabled optional builtins', () => {
+  const result = collectEntries({
+    bundles: [
+      { name: 'off-by-default', optional: true, installed: false, enabled: false },
+      { name: 'opt-in', optional: true, installed: false, enabled: true },
+    ],
+  })
+  assert.deepEqual(result.entries, [{ kind: 'builtin', value: 'opt-in', version: null, enabled: true }])
+})
+
 test('preview marks same version skip and old version upgrade', () => {
   const preview = previewEntries([
     { name: 'same', version: '1.0.0' },
@@ -63,6 +93,16 @@ test('preview marks same version skip and old version upgrade', () => {
     { name: 'old', version: '1.0.0' },
   ] })
   assert.deepEqual(preview.map((row) => row.action), ['skip', 'upgrade', 'install'])
+})
+
+test('preview recognizes a GitHub bundle recorded by listBundles source', () => {
+  // listBundles() reports the recorded spec as `source`, not `spec`; without
+  // this match an already-installed GitHub plugin would look like a new install.
+  const preview = previewEntries(
+    [{ spec: 'github:owner/repo#v1', version: '0.3.17', enabled: true }],
+    { installed: [{ name: 'repo', source: 'github:owner/repo#v1', version: '0.3.17', enabled: true }] },
+  )
+  assert.equal(preview[0].action, 'skip')
 })
 
 test('preview applies an enabled-state change without reinstalling', () => {

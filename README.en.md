@@ -38,9 +38,15 @@ Tested with Web profiles on DSH `0.2.1-rc.2` and `0.2.0-rc.2`. The CLI cannot mo
 
 ## Usage
 
-1. **Share:** click **Export current profile**, then **Copy** and send the code. You can also choose **Show QR code** and save it as PNG or SVG.
+1. **Share:** click **Export current profile**, check the plugins to share (all are selected initially), then click **Generate selected code**. Choose **Copy** and send the code, or **Show QR code** and save it as PNG or SVG. Unchecked plugins stay out of the code; select at least one item.
 2. **Receive:** paste a code and click **Parse code**. For a QR image, choose **Scan a code** or drop the image onto the panel.
-3. **Install:** check the plugin names and sources, then click **Install**, **Enable**, or **Disable** on each row, or use **Install all**. Parsing alone does not change any plugins.
+3. **Install:** check the plugin names and sources, then click **Install**, **Enable**, or **Disable** on each row, or use **Queue all available**. Parsing alone does not change any plugins.
+
+While an installation runs, click other plugins to queue them in click order. One item runs at a time. Waiting items show their position and can be removed individually or with **Clear waiting items**. A failure or script approval request pauses the queue and keeps completed items. Retry, approve scripts, or choose **Skip and continue**. Cancelling the current install waits for the host operation to finish before pausing.
+
+The code, parsing, export, and scanning controls stay locked while the queue is unfinished. Closing settings keeps the queue running. Reloading or closing the page loses waiting items, while an already submitted install may still run on the host; parse again when returning. If the connection drops, the queue checks the host result first. When **Reconnect** appears, use it to confirm the original operation before continuing.
+
+**Item results** at the bottom keeps this browser's last 100 operations with a returned result, showing the plugin, time, action and outcome. Each retry is recorded separately; parsing, exporting or reloading the page keeps these records. **Clear result history** removes only records, without changing plugins or the queue. Records contain names, install specs and short error codes, not share codes, configuration or raw install logs. They do not represent the current plugin state or restore operations that were unfinished at reload. If browser storage is blocked, a notice explains that results are kept only on the current page.
 
 Restart DSH after installing. If the page still looks unchanged, press Ctrl+F5 to refresh.
 
@@ -50,7 +56,7 @@ Scanning works with clear, upright QR images. If a blurry, tilted, or dense code
 
 ### When you see “Manual update needed”
 
-The current DSH installer cannot replace an installed plugin while DSH is running. This disables **Install all**, but other plugins can still be installed individually.
+The current DSH installer cannot replace an installed plugin while DSH is running. Such entries stay out of the queue; **Queue all available** can still process other plugins.
 
 For a Web profile, stop that DSH instance and use the full install spec shown on the row:
 
@@ -79,13 +85,13 @@ The same command updates GitHub installations.
 - npm, GitHub, and official optional DSH builtins are supported. Unsupported sources, such as local paths, are skipped and counted during export.
 - Share codes and QR images are processed locally; images are never uploaded. Installing plugins requires a network connection.
 - Check sources before installing. The checksum detects damaged data but does not establish trust; third-party plugins can execute code. Packages that need install scripts require separate approval.
-- A failed batch stops and attempts to remove plugins installed by that run and restore changed enabled states.
+- The queue processes one item at a time and pauses on failure. Previously completed installations and enabled-state changes are kept.
 - Share endpoints use DSH login authentication and Host/Origin checks. Unauthenticated requests cannot read the plugin list or install plugins.
 
 ## Development
 
 ```powershell
-npm test                       # 57 tests
+npm test                       # automated tests
 pnpm pack --dry-run            # inspect package contents
 npm run encode:example         # generate an example code
 node src/cli.mjs decode D1...   # decode a share code

@@ -114,7 +114,7 @@ export async function applyPreview(preview, manager, { requestId = undefined, ap
           requestId,
           ...(approvedBuilds === undefined ? {} : { approvedBuilds }),
         })
-        if (result?.pendingBuilds?.length && approvedBuilds === undefined) {
+        if (result?.pendingBuilds?.length) {
           throw Object.assign(new Error('build-approval-required'), { code: 'build-approval-required', pendingBuilds: result.pendingBuilds })
         }
         if (result?.application === 'failed' || result?.application === 'cancelled') {

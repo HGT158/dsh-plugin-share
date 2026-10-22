@@ -479,6 +479,39 @@ test('import route preflights manual updates before invoking the manager', async
   assert.deepEqual(calls, [])
 })
 
+test('export preview lists portable entries and selected export preserves only their versions and states', async () => {
+  const bundles = [
+    { name: 'one', source: 'one@1.0.0', version: '1.0.0', enabled: false },
+    { name: 'two', source: 'github:owner/two#main', version: '2.0.0', enabled: true },
+    { name: 'local', source: 'link:./local', version: '1.0.0', enabled: true },
+  ].map((bundle) => ({ installed: true, removable: true, ...bundle }))
+  const { handler } = registerRoute({ manager: { listBundles: () => bundles } })
+  const invoke = async (action, body) => {
+    const res = fakeResponse()
+    await handler({ method: 'POST', url: `/api/plugin-share/${action}`, headers: {},
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)) } }, res)
+    return { status: res.statusCode, ...JSON.parse(res.body) }
+  }
+  const preview = await invoke('export-preview', {})
+  assert.equal(preview.entries.length, 2)
+  assert.equal(preview.skipped.length, 1)
+  assert.equal(preview.code, undefined)
+  for (const entry of preview.entries) {
+    const exported = await invoke('export', { entries: [entry] })
+    const decoded = decodeCode(exported.code).entries
+    assert.equal(decoded.length, 1)
+    assert.equal(decoded[0].name ?? decoded[0].spec, entry.value)
+    assert.equal(decoded[0].version, entry.version)
+    assert.equal(decoded[0].enabled, entry.enabled)
+  }
+  assert.equal((await invoke('export', { entries: [] })).ok, false)
+  assert.equal((await invoke('export', { entries: 'invalid' })).status, 400)
+  const guarded = registerRoute({ rejection: 401 }).handler
+  const refused = fakeResponse()
+  await guarded({ method: 'POST', url: '/api/plugin-share/export-preview', headers: {} }, refused)
+  assert.equal(refused.statusCode, 401)
+})
+
 test('an admitted caller reaches the share routes', async () => {
   const { handler } = registerRoute({ rejection: undefined })
   const response = fakeResponse()
@@ -499,4 +532,58 @@ test('the host half declares the connection dependency it fences with', () => {
   assert.ok(inject.includes('connection'), 'connection must be injected, not read opportunistically')
   assert.ok(inject.includes('webServer'))
   assert.ok(inject.includes('pluginManager'))
+})
+
+test('import receipts, cancellation and the writer lock share the same host job', async () => {
+  let releasePreview
+  let installs = 0
+  const cancelled = []
+  const { handler } = registerRoute({ manager: {
+    listBundles: () => new Promise((resolve) => { releasePreview = () => resolve([]) }),
+    installBundle: () => { installs += 1; return { application: 'applied' } },
+    cancelInstall: (id) => { cancelled.push(id); return true },
+  } })
+  const invoke = async (action, body) => {
+    const res = fakeResponse()
+    await handler({ method: 'POST', url: `/api/plugin-share/${action}`, headers: {},
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)) } }, res)
+    return { status: res.statusCode, ...JSON.parse(res.body) }
+  }
+  const body = { code: encodeCode([{ name: 'fixture', version: '1.0.0' }]), confirm: true, requestId: 'job-one', only: [0] }
+  const first = invoke('import', body)
+  await new Promise((resolve) => setImmediate(resolve))
+  const duplicate = invoke('import', body)
+  assert.equal((await invoke('import', { ...body, requestId: 'job-two' })).error, 'import-busy')
+  assert.equal((await invoke('import-status', { requestId: 'job-one' })).state, 'running')
+  assert.equal((await invoke('cancel', { requestId: 'job-one' })).cancelRequested, true)
+  releasePreview()
+  const result = await first
+  assert.equal(result.state, 'finished')
+  assert.equal(result.error, 'import-cancelled')
+  assert.deepEqual(await duplicate, result)
+  assert.equal((await invoke('import-status', { requestId: 'job-one' })).error, 'import-cancelled')
+  assert.equal((await invoke('import-status', { requestId: 'missing' })).state, 'unknown')
+  assert.deepEqual(cancelled, ['job-one'])
+  assert.equal(installs, 0)
+})
+
+test('job receipt and cancellation endpoints remain behind the trust fence', async () => {
+  const { handler } = registerRoute({ rejection: 401 })
+  for (const action of ['import-status', 'cancel']) {
+    const res = fakeResponse()
+    await handler({ method: 'POST', url: `/api/plugin-share/${action}`, headers: {},
+      async *[Symbol.asyncIterator]() { throw new Error('must not read unauthenticated bodies') } }, res)
+    assert.equal(res.statusCode, 401)
+  }
+})
+
+test('an approval retry that still requests builds must not count as an installation', async () => {
+  const preview = previewEntries([{ name: 'build-fixture', version: '1.0.0' }])
+  const result = await applyPreview(preview, {
+    installBundle: () => ({ pendingBuilds: ['another-build'] }),
+  }, { approvedBuilds: ['first-build'] })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'build-approval-required')
+  assert.deepEqual(result.pendingBuilds, ['another-build'])
+  assert.deepEqual(result.report, [])
 })

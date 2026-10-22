@@ -4,6 +4,7 @@ import { applyPreview, previewEntries, selectPreview } from './import.mjs'
 import { decodeCode, encodeCode } from './codec.mjs'
 import { encodeQr } from '../shared/qr.mjs'
 import { scanQrImage } from '../shared/qr-scan.mjs'
+import { createImportJobs } from './jobs.mjs'
 
 const ROUTE = '/api/plugin-share'
 // A 1400x1400 grayscale scan payload is about 1.9 MB before base64, so the
@@ -87,10 +88,10 @@ async function previewCode(code, pluginManager) {
   const preview = previewEntries(decoded.entries.map(publicEntry), { installed: bundles })
   // `selection` tells the client this host half understands `only`, so a
   // per-row button can never be answered by an older host as "apply all".
-  return { ok: true, selection: true, decoded, bundles, preview }
+  return { ok: true, selection: true, queue: true, decoded, bundles, preview }
 }
 
-async function handle(req, res, pluginManager) {
+async function handle(req, res, pluginManager, jobs) {
   const pathname = new URL(req.url ?? '/', 'http://dsh.local').pathname
   const action = pathname.slice(ROUTE.length).replace(/^\//u, '') || 'state'
   if (req.method === 'GET' && action === 'state') {
@@ -104,7 +105,16 @@ async function handle(req, res, pluginManager) {
     return
   }
   const body = await readJson(req)
+  if (action === 'export-preview') {
+    const collected = collectForBundles(await listBundles(pluginManager), body)
+    sendJson(res, 200, { ok: true, ...collected })
+    return
+  }
   if (action === 'export') {
+    if (body.entries !== undefined && !Array.isArray(body.entries)) {
+      sendJson(res, 400, { ok: false, error: 'entries-invalid' })
+      return
+    }
     const bundles = await listBundles(pluginManager)
     const collected = Array.isArray(body.entries)
       ? { entries: body.entries, skipped: [] }
@@ -188,43 +198,50 @@ async function handle(req, res, pluginManager) {
     return
   }
   if (action === 'import') {
-    const result = await previewCode(body.code, pluginManager)
-    if (!result.ok) {
-      sendJson(res, 400, result)
-      return
-    }
     if (body.only !== undefined && (!Array.isArray(body.only) || body.only.some((value) => !Number.isInteger(value)))) {
       sendJson(res, 400, { ok: false, error: 'only-invalid' })
       return
     }
     if (body.confirm !== true) {
-      sendJson(res, 200, { ...result, error: 'confirmation-required' })
-      return
-    }
-    // `only` carries preview indices so the UI can apply a single row.
-    const selected = selectPreview(result.preview, body.only)
-    if (selected.length === 0) {
-      sendJson(res, 400, { ok: false, error: 'selection-empty', preview: result.preview })
+      const result = await previewCode(body.code, pluginManager)
+      sendJson(res, result.ok ? 200 : 400, result.ok ? { ...result, error: 'confirmation-required' } : result)
       return
     }
     const requestId = typeof body.requestId === 'string' && body.requestId ? body.requestId : randomUUID()
-    const applied = await applyPreview(selected, pluginManager, {
-      requestId,
-      ...(Array.isArray(body.approvedBuilds) ? { approvedBuilds: body.approvedBuilds } : {}),
+    const fingerprint = JSON.stringify([body.code, body.only ?? null, body.approvedBuilds ?? null])
+    const applied = await jobs.run(requestId, fingerprint, async (signal) => {
+      const result = await previewCode(body.code, pluginManager)
+      if (!result.ok) return { ...result, httpStatus: 400 }
+      const selected = selectPreview(result.preview, body.only)
+      if (selected.length === 0) return { ok: false, error: 'selection-empty', httpStatus: 400, preview: result.preview }
+      const imported = await applyPreview(selected, pluginManager, {
+        requestId,
+        signal,
+        ...(Array.isArray(body.approvedBuilds) ? { approvedBuilds: body.approvedBuilds } : {}),
+      })
+      return { ...imported, preview: result.preview }
     })
-    sendJson(res, applied.ok ? 200 : 409, { ...applied, requestId, preview: result.preview })
+    sendJson(res, applied.httpStatus ?? (applied.ok ? 200 : 409), applied)
     return
   }
-  if (action === 'cancel') {
-    if (typeof pluginManager.cancelInstall !== 'function') {
-      sendJson(res, 501, { ok: false, error: 'cancel-install-unavailable' })
-      return
-    }
+  if (action === 'import-status' || action === 'cancel') {
     if (typeof body.requestId !== 'string' || !body.requestId) {
       sendJson(res, 400, { ok: false, error: 'request-id-required' })
       return
     }
-    sendJson(res, 200, { ok: true, result: await pluginManager.cancelInstall(body.requestId) })
+    const job = action === 'cancel' ? jobs.cancel(body.requestId) : jobs.status(body.requestId)
+    if (!job) {
+      sendJson(res, 404, { ok: false, error: 'import-not-found', state: 'unknown' })
+      return
+    }
+    if (action === 'import-status' || job.state === 'finished') {
+      sendJson(res, 200, job)
+      return
+    }
+    const result = typeof pluginManager.cancelInstall === 'function'
+      ? await pluginManager.cancelInstall(body.requestId)
+      : null
+    sendJson(res, 200, { ok: true, cancelRequested: true, result })
     return
   }
   sendJson(res, 404, { ok: false, error: 'route-not-found' })
@@ -255,12 +272,13 @@ function rejectUntrusted(ctx, req, res) {
 
 /** DSH Host half: exposes the local D1 share workflow over same-origin routes. */
 export function apply(ctx) {
+  const jobs = createImportJobs()
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: ROUTE,
     handler: (req, res) => {
       if (rejectUntrusted(ctx, req, res)) return undefined
-      return handle(req, res, ctx.pluginManager).catch((error) => {
+      return handle(req, res, ctx.pluginManager, jobs).catch((error) => {
         if (res.headersSent) {
           res.destroy(error)
           return

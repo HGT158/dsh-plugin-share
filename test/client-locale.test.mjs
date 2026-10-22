@@ -25,7 +25,10 @@ function loadClient() {
       useState: (initial) => {
         const index = cursor++
         if (!(index in state)) state[index] = typeof initial === 'function' ? initial() : initial
-        return [state[index], (next) => { state[index] = typeof next === 'function' ? next(state[index]) : next }]
+        // React setters belong to the view that created them. An old async
+        // response must not write into a newly mounted view's local hooks.
+        const viewState = state
+        return [viewState[index], (next) => { viewState[index] = typeof next === 'function' ? next(viewState[index]) : next }]
       },
       useRef: (initial) => {
         const index = cursor++
@@ -289,6 +292,120 @@ test('an older host cannot enable queue actions without the receipt capability',
     assert.equal(button(render(), 'installAll').props.disabled, true)
     assert.ok([...nodes(render())].some((node) => node.children.includes('hostOld')))
   } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
+for (const lateOutcome of ['success', 'failure', 'old-host']) {
+  test(`an unmounted parse's late ${lateOutcome} cannot replace the visible share code or install target`, async () => {
+    const { mountTab } = await loadClient()
+    const previousFetch = globalThis.fetch
+    const imports = []
+    let resolveA
+    let pendingA
+    const preview = (name) => [{ index: 0, action: 'install', verdict: { ok: true },
+      spec: `${name}@1.0.0`, entry: { kind: 'npm', value: name, version: '1.0.0' } }]
+    const reply = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    const input = (tree) => [...nodes(tree)].find((node) => node.type === 'textarea')
+    try {
+      globalThis.fetch = async (url, options) => {
+        const body = JSON.parse(options.body)
+        if (url.endsWith('/parse') && body.code === 'D1A') return new Promise((resolve) => { resolveA = resolve })
+        if (url.endsWith('/parse')) return reply({ ok: true, selection: true, queue: true, preview: preview('plugin-b') })
+        assert.ok(url.endsWith('/import'))
+        imports.push(body)
+        return reply({ ok: true, state: 'finished', report: [] })
+      }
+      const viewA = mountTab()
+      input(viewA()).props.onChange({ target: { value: 'D1A' } })
+      pendingA = button(viewA(), 'parse').props.onClick()
+      const viewB = mountTab() // Close settings while A is in flight, then reopen.
+      input(viewB()).props.onChange({ target: { value: 'D1B' } })
+      await button(viewB(), 'parse').props.onClick()
+      resolveA(reply(lateOutcome === 'failure' ? { ok: false, error: 'bad-code' }
+        : { ok: true, selection: true, queue: lateOutcome !== 'old-host', preview: preview('plugin-a') }))
+      await pendingA
+      const visible = viewB()
+      assert.equal(input(visible).props.value, 'D1B')
+      const list = [...nodes(visible)].find((node) => node.type === 'ul' && node.props?.className === 'dps-cards')
+      assert.ok([...nodes(list)].some((node) => node.children.includes('plugin-b')))
+      assert.ok(![...nodes(list)].some((node) => node.children.includes('plugin-a')))
+      button(visible, 'rowInstall').props.onClick()
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(imports.length, 1)
+      assert.equal(imports[0].code, 'D1B')
+      assert.deepEqual(imports[0].only, [0])
+    } finally {
+      resolveA?.(reply({ ok: false, error: 'test-cleanup' }))
+      await pendingA
+      globalThis.fetch = previousFetch
+    }
+  })
+}
+
+test('a stale install callback checks its preview code against the live queue before dispatch', async () => {
+  const { mountTab } = await loadClient()
+  const render = mountTab()
+  const previousFetch = globalThis.fetch
+  const imports = []
+  const input = () => [...nodes(render())].find((node) => node.type === 'textarea')
+  try {
+    globalThis.fetch = async (url, options) => {
+      const body = JSON.parse(options.body)
+      const result = url.endsWith('/parse')
+        ? { ok: true, selection: true, queue: true, preview: [{ index: 0, action: 'install', verdict: { ok: true },
+          spec: 'plugin@1.0.0', entry: { kind: 'npm', value: 'plugin', version: '1.0.0' } }] }
+        : { ok: true, state: 'finished', report: [] }
+      if (url.endsWith('/import')) imports.push(body)
+      return { status: 200, text: async () => JSON.stringify(result) }
+    }
+    input().props.onChange({ target: { value: 'D1A' } })
+    await button(render(), 'parse').props.onClick()
+    const staleInstall = button(render(), 'rowInstall').props.onClick
+    input().props.onChange({ target: { value: 'D1B' } })
+    await button(render(), 'parse').props.onClick()
+    staleInstall()
+    assert.equal(imports.length, 0)
+    assert.ok([...nodes(render())].some((node) => node.children.includes('stale')))
+    button(render(), 'rowInstall').props.onClick()
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(imports.length, 1)
+    assert.equal(imports[0].code, 'D1B')
+  } finally { globalThis.fetch = previousFetch }
+})
+
+test('an unmounted export response cannot clear a newer view\'s parsed queue', async () => {
+  const { mountTab } = await loadClient()
+  const previousFetch = globalThis.fetch
+  const imports = []
+  let resolveExport
+  let pendingExport
+  const reply = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+  try {
+    globalThis.fetch = async (url, options) => {
+      if (url.endsWith('/export-preview')) return reply({ ok: true, entries: [{ kind: 'npm', value: 'plugin-a', version: '1.0.0' }] })
+      if (url.endsWith('/export')) return new Promise((resolve) => { resolveExport = resolve })
+      if (url.endsWith('/parse')) return reply({ ok: true, selection: true, queue: true,
+        preview: [{ index: 0, action: 'install', verdict: { ok: true }, spec: 'plugin-b@1.0.0', entry: { kind: 'npm', value: 'plugin-b' } }] })
+      imports.push(JSON.parse(options.body))
+      return reply({ ok: true, state: 'finished', report: [] })
+    }
+    const viewA = mountTab()
+    await button(viewA(), 'export').props.onClick()
+    pendingExport = button(viewA(), 'exportGenerate').props.onClick()
+    const viewB = mountTab()
+    const input = [...nodes(viewB())].find((node) => node.type === 'textarea')
+    input.props.onChange({ target: { value: 'D1B' } })
+    await button(viewB(), 'parse').props.onClick()
+    resolveExport(reply({ ok: true, code: 'D1A' }))
+    await pendingExport
+    button(viewB(), 'rowInstall').props.onClick()
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(imports.length, 1)
+    assert.equal(imports[0].code, 'D1B')
+  } finally {
+    resolveExport?.(reply({ ok: false, error: 'test-cleanup' }))
+    await pendingExport
     globalThis.fetch = previousFetch
   }
 })

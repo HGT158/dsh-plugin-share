@@ -413,10 +413,14 @@ window.__ModuleLoader__.load({
           notify()
           return true
         },
-        enqueue(indices) {
+        enqueue(indices, expectedCode) {
+          // The visible preview must belong to this exact queue snapshot.
+          // Check here, synchronously with insertion, rather than at render time.
+          if (!code || expectedCode !== code) return false
           for (const index of indices) if (available(index)) waiting.push(index)
           notify()
           pump()
+          return true
         },
         remove(index) { waiting = waiting.filter((value) => value !== index); notify() },
         clearWaiting() {
@@ -662,8 +666,18 @@ window.__ModuleLoader__.load({
       const rootRef = React.useRef(null)
       const scanRef = React.useRef(null)
       const interaction = React.useRef(false)
+      const view = React.useRef(null)
 
-      React.useEffect(() => importQueue.subscribe(setQueue), [])
+      React.useEffect(() => {
+        const token = {}
+        view.current = token
+        const unsubscribe = importQueue.subscribe(setQueue)
+        return () => {
+          view.current = null
+          unsubscribe()
+        }
+      }, [])
+      const ownsView = (token) => token !== null && view.current === token
 
       const trimmed = code.trim()
       const parsed = preview !== null && parsedCode !== '' && parsedCode === trimmed
@@ -673,6 +687,7 @@ window.__ModuleLoader__.load({
       const pending = queue.current?.result?.pendingBuilds
 
       const clear = () => {
+        if (!view.current) return
         setPreview(null)
         setParsedCode('')
         importQueue.configure('', [])
@@ -681,18 +696,20 @@ window.__ModuleLoader__.load({
       }
 
       const enqueue = (indices) => {
-        if (interaction.current || !parsed || !selection) return
+        if (!view.current || interaction.current || !parsed || !selection) return
         setStatus(null)
-        importQueue.enqueue(indices)
+        if (!importQueue.enqueue(indices, parsedCode)) setStatus({ kind: 'error', text: t('stale') })
       }
 
       const exportCurrent = async () => {
-        if (interaction.current || importQueue.locked()) return
+        const token = view.current
+        if (!token || interaction.current || importQueue.locked()) return
         interaction.current = true
         setBusy(true)
         setStatus(null)
         try {
           const result = await request('export-preview', {})
+          if (!ownsView(token)) return
           if (result.ok && Array.isArray(result.entries)) {
             setExportCandidates(result.entries)
             setExportSelection(result.entries.map((_, index) => index))
@@ -701,13 +718,16 @@ window.__ModuleLoader__.load({
             setStatus({ kind: 'error', text: result.httpStatus === 404 ? t('exportOld') : `${t('failure')}: ${result.error}` })
           }
         } finally {
-          interaction.current = false
-          setBusy(false)
+          if (ownsView(token)) {
+            interaction.current = false
+            setBusy(false)
+          }
         }
       }
 
       const generateExport = async () => {
-        if (interaction.current || importQueue.locked() || !exportCandidates) return
+        const token = view.current
+        if (!token || interaction.current || importQueue.locked() || !exportCandidates) return
         const entries = exportCandidates.filter((_, index) => exportSelection.includes(index))
         if (!entries.length) { setStatus({ kind: 'error', text: t('exportEmpty') }); return }
         interaction.current = true
@@ -715,6 +735,7 @@ window.__ModuleLoader__.load({
         setStatus(null)
         try {
           const result = await request('export', { entries })
+          if (!ownsView(token)) return
           if (result.ok && result.code) {
             setCode(result.code)
             // A fresh export replaces the code, so any parsed list no longer
@@ -730,13 +751,16 @@ window.__ModuleLoader__.load({
             setStatus({ kind: 'error', text: `${t('failure')}: ${reason}` })
           }
         } finally {
-          interaction.current = false
-          setBusy(false)
+          if (ownsView(token)) {
+            interaction.current = false
+            setBusy(false)
+          }
         }
       }
 
       const parseCode = async (value, { quiet = false, fromScan = false } = {}) => {
-        if (importQueue.locked() || (interaction.current && !fromScan)) return false
+        const token = view.current
+        if (!token || importQueue.locked() || (interaction.current && !fromScan)) return false
         interaction.current = true
         setExportCandidates(null)
         const text = value.trim()
@@ -744,12 +768,15 @@ window.__ModuleLoader__.load({
         if (!quiet) setStatus(null)
         try {
           const result = await request('parse', { code: text })
+          // Closing settings invalidates all requests belonging to that view,
+          // including failures which would otherwise clear a newer queue.
+          if (!ownsView(token)) return false
           if (result.ok && result.preview) {
+            const supported = result.selection === true && result.queue === true
+            if (!importQueue.configure(supported ? text : '', supported ? result.preview : [])) return false
             setPreview(result.preview)
             setParsedCode(text)
-            const supported = result.selection === true && result.queue === true
             setSelection(supported)
-            importQueue.configure(supported ? text : '', supported ? result.preview : [])
             return true
           }
           clear()
@@ -759,8 +786,10 @@ window.__ModuleLoader__.load({
           })
           return false
         } finally {
-          if (!fromScan) interaction.current = false
-          setBusy(false)
+          if (ownsView(token)) {
+            if (!fromScan) interaction.current = false
+            setBusy(false)
+          }
         }
       }
 
@@ -768,17 +797,21 @@ window.__ModuleLoader__.load({
 
       /** Read a QR image, put the code in the box and parse it right away. */
       const scanImageFile = async (file) => {
-        if (!file || interaction.current || importQueue.locked()) return
+        const token = view.current
+        if (!token || !file || interaction.current || importQueue.locked()) return
         interaction.current = true
         setScanBusy(true)
         setStatus(null)
         try {
           const { width, height, gray } = await imageFileToGray(file)
+          if (!ownsView(token)) return
           const result = await request('scan', { width, height, gray: toBase64(gray) })
+          if (!ownsView(token)) return
           if (result.ok && result.code) {
             setCode(result.code)
             setQr(null)
             const parsedOk = await parseCode(result.code, { quiet: true, fromScan: true })
+            if (!ownsView(token)) return
             setStatus({
               kind: parsedOk ? 'ok' : 'error',
               text: parsedOk ? `${t('scanDone')} · ${result.entries} ${t('willRun')}` : t('failure'),
@@ -796,10 +829,12 @@ window.__ModuleLoader__.load({
                   : t('scanBadImage')
           setStatus({ kind: 'error', text: reason })
         } catch (error) {
-          setStatus({ kind: 'error', text: `${t('scanBadImage')}: ${error.message}` })
+          if (ownsView(token)) setStatus({ kind: 'error', text: `${t('scanBadImage')}: ${error.message}` })
         } finally {
-          interaction.current = false
-          setScanBusy(false)
+          if (ownsView(token)) {
+            interaction.current = false
+            setScanBusy(false)
+          }
         }
       }
       scanRef.current = scanImageFile

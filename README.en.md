@@ -24,7 +24,7 @@ dsh --profile web
 
 Replace `web` with your profile name. Open **Settings → Built-in plugins → Plugin share** after starting DSH. Both sender and recipient need this plugin.
 
-To pin a version, use `dsh-plugin-share@0.2.4` as the package name. You can also install from GitHub:
+To pin a version, use `dsh-plugin-share@0.2.5` as the package name. You can also install from GitHub:
 
 ```powershell
 dsh plugin --profile web add 'dsh-plugin-share@github:HGT158/dsh-plugin-share#main'
@@ -34,7 +34,7 @@ Keep the `package@` prefix in the GitHub command to avoid dependency name errors
 
 In the desktop app, click **Plugins** in the top-left corner and enter `dsh-plugin-share` to install.
 
-Tested with Web profiles on DSH `0.2.1-rc.2` and `0.2.0-rc.2`. The CLI cannot modify desktop profiles.
+This release was tested with a Web profile on DSH `0.2.1-rc.2`; earlier releases were also tested on `0.2.0-rc.2`. The CLI cannot modify desktop profiles.
 
 ## Usage
 
@@ -83,7 +83,7 @@ The same command updates GitHub installations.
 
 - Codes contain only plugin sources, versions, and enabled states. Configuration, API keys, and tokens are excluded. Recipients configure each plugin themselves.
 - npm, GitHub, and official optional DSH builtins are supported. Unsupported sources, such as local paths, are skipped and counted during export.
-- Share codes and QR images are processed locally; images are never uploaded. Installing plugins requires a network connection.
+- Share codes and QR images are processed by your browser and the connected DSH instance, without third-party services. To scan an image, the browser resizes it and sends grayscale data to that DSH instance; a remote instance receives this data on its remote host. Installing plugins requires a network connection.
 - Check sources before installing. The checksum detects damaged data but does not establish trust; third-party plugins can execute code. Packages that need install scripts require separate approval.
 - The queue processes one item at a time and pauses on failure. Previously completed installations and enabled-state changes are kept.
 - Share endpoints use DSH login authentication and Host/Origin checks. Unauthenticated requests cannot read the plugin list or install plugins.

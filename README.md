@@ -24,7 +24,7 @@ dsh --profile web
 
 把 `web` 换成你使用的 profile 名称。启动后打开 **设置 → 内置插件 → 插件分享**。分享方和接收方都需要安装本插件。
 
-指定版本时，将包名写成 `dsh-plugin-share@0.2.4`。也可以从 GitHub 安装：
+指定版本时，将包名写成 `dsh-plugin-share@0.2.5`。也可以从 GitHub 安装：
 
 ```powershell
 dsh plugin --profile web add 'dsh-plugin-share@github:HGT158/dsh-plugin-share#main'
@@ -34,7 +34,7 @@ dsh plugin --profile web add 'dsh-plugin-share@github:HGT158/dsh-plugin-share#ma
 
 桌面端：点击左上角「插件」，输入包名 `dsh-plugin-share` 即可安装。
 
-已在 DSH `0.2.1-rc.2` 和 `0.2.0-rc.2` 的 Web profile 验证。CLI 无法修改桌面 profile。
+本版已在 DSH `0.2.1-rc.2` 的 Web profile 验证；早期版本也曾在 `0.2.0-rc.2` 验证。CLI 无法修改桌面 profile。
 
 ## 使用
 
@@ -83,7 +83,7 @@ dsh --profile web
 
 - 分享码只包含插件来源、版本和启用状态，不包含配置、API key 或 token。接收方需要自行配置插件。
 - 支持 npm、GitHub 和 DSH 官方可选内置插件；导出时会跳过本地路径等不支持的来源，并显示数量。
-- 分享码和二维码在本机处理，图片不会上传。安装插件时需要联网下载。
+- 分享码和二维码由浏览器与当前连接的 DSH 实例处理，不发送给第三方服务。扫码时，图片会在浏览器中缩放并转成灰度数据，再发送给该 DSH 实例识别；使用远程实例时，这些数据会传输到远程主机。安装插件时需要联网下载。
 - 安装前请核对来源。分享码的校验只能发现数据损坏，不能证明插件可信；第三方插件可以执行代码。需要安装脚本的包会另行请求批准。
 - 队列逐项处理，失败后暂停；之前成功安装的插件和启用状态变更会保留。
 - 分享接口使用 DSH 的登录鉴权及 Host/Origin 校验，未登录的请求无法读取清单或安装插件。
